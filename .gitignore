@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# Ansible
+*.retry
+
+# Docker/Compose
+**/compose/**/data/
+**/compose/**/tmp/
+**/compose/**/logs/
+*.log
+
+# Ключи/сертификаты (храним только примеры!)
+*.pem
+*.key
+*.crt
+*.p12
+
+# ОС/IDE
+.DS_Store
+Thumbs.db
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
