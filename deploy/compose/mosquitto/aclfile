@@ -1,7 +1,0 @@
-user headunit
-topic write telemetry/#
-topic read control/#
-
-user saas
-topic read telemetry/#
-topic write control/#
