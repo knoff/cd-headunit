@@ -19,6 +19,9 @@ __pycache__/
 *.crt
 *.p12
 
+# Загрузочная конфигурация headunit
+device.conf
+
 # ОС/IDE
 .DS_Store
 Thumbs.db

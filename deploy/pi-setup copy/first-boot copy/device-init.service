@@ -1,0 +1,12 @@
+[Unit]
+Description=Device initialization from /boot/firmware/device.conf
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/init-device-config.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

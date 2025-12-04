@@ -1,0 +1,8 @@
+# /etc/fstab (v3) — placeholders are replaced on first boot
+PARTUUID=__BOOT_PARTUUID__     __BOOT_MNT__     vfat  defaults,ro,utf8           0 2
+PARTUUID=__ROOT_PARTUUID__     /                ext4  defaults,noatime           0 1
+PARTUUID=__DATA_PARTUUID__     /data            ext4  defaults,noatime           0 2
+PARTUUID=__FACTORY_PARTUUID__  /factory         ext4  ro,noatime                 0 2
+/data/var_lib_docker           /var/lib/docker  none  bind                       0 0
+/data/var_log                  /var/log         none  bind                       0 0
+/data/srv                      /srv             none  bind                       0 0

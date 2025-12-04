@@ -1,0 +1,30 @@
+screen_width = Window.GetWidth(0);
+screen_height = Window.GetHeight(0);
+screen_half_width = Window.GetWidth(0) / 2;
+screen_half_height = Window.GetHeight(0) / 2;
+
+Window.SetBackgroundTopColor   (0.1686, 0.1647, 0.1608);
+Window.SetBackgroundBottomColor(0.1686, 0.1647, 0.1608);
+
+//------------------------------- (Image Animation) ------------------------------//
+
+for (i = 0; i < 60; i++)
+  image[i] = Image("progress-" + i + ".png");
+sprite = Sprite();
+
+//------------------------------- (Image Position) ------------------------------//
+
+sprite.SetX(Window.GetX() + (Window.GetWidth(0) / 2 - image[0].GetWidth() / 2)); # Place images in the center
+sprite.SetY(Window.GetY() + (Window.GetHeight(0) / 2 - image[0].GetHeight() / 2));
+
+progress = 1;
+
+//------------------------------ (Image Refresh-Rate) ------------------------------//
+
+fun refresh_callback ()
+  {
+    sprite.SetImage(image[Math.Int(progress / 2) % 60]);
+    progress++;
+  }
+
+Plymouth.SetRefreshFunction (refresh_callback);

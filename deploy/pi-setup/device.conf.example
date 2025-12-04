@@ -1,0 +1,30 @@
+# Copy to /boot/device.conf before first boot
+
+SERIAL=CDR-00012345
+DEVICE_HOSTNAME=cdr-00012345
+
+# User
+USER_NAME=coffee
+USER_PASSWORD=coffee123
+
+# External Wi-Fi (client)
+WIFI_SSID=CoffeeShopNet
+WIFI_PASS=secretwifi
+WIFI_COUNTRY=RU
+
+# Internal AP (served by USB dongle if present)
+AP_SSID=CoffeeMachine-00012345
+AP_PASS=secretpassword
+AP_CHANNEL=6
+AP_ADDRESS=192.168.50.1
+
+TIMEZONE=Europe/Moscow
+KEYMAP=us
+
+# Disk partitions size
+# TARGET_P2_GB - rootA
+# TARGET_P3_GB - rootB
+# TARGET_P5_GB - factory
+TARGET_P2_GB=4
+TARGET_P3_GB=4
+TARGET_P5_GB=4

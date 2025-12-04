@@ -1,0 +1,18 @@
+# Copy to /boot/device.conf before first boot
+
+SERIAL=CDR-00012345
+DEVICE_HOSTNAME=cdr-00012345
+
+# User
+USER_NAME=coffee
+USER_PASSWORD=coffee123
+
+# External Wi-Fi (client)
+WIFI_SSID=CoffeeShopNet
+WIFI_PASS=secretwifi
+
+# Internal AP (served by USB dongle if present)
+AP_SSID=CoffeeMachine-00012345
+AP_PASS=secretpassword
+AP_CHANNEL=6
+AP_ADDRESS=192.168.50.1
