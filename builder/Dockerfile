@@ -4,6 +4,7 @@ FROM debian:trixie-slim
 # Добавляем --no-install-recommends для минимизации размера
 RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
+  gawk \
   parted \
   dosfstools \
   e2fsprogs \
@@ -20,8 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libarchive-tools \
   && rm -rf /var/lib/apt/lists/*
 
-# Рабочая директория внутри контейнера
+# Рабочая директория
 WORKDIR /workspace
 
-# Скрипт сборки будет точкой входа
-ENTRYPOINT ["/bin/bash", "builder/build.sh"]
+# По умолчанию запускаем bash (чтобы контейнер не закрывался мгновенно, если запущен интерактивно)
+CMD ["/bin/bash"]

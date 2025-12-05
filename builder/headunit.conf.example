@@ -1,21 +1,40 @@
-# --- User Configuration ---
-USER_NAME="cdreborn"
-USER_PASS="brewme"
+[common]
+PROJECT_NAME="HeadUnit-OS"
+IMAGE_NAME="headunit_v1"
 
-# --- Network Configuration ---
-# Внешний Wi-Fi (клиент)
-WIFI_SSID="CoffeeShop_WiFi"
-WIFI_PASS="secretpassword"
-WIFI_COUNTRY="RU"
+; Входной базовый образ (укажите имя файла в корне workspace)
+INPUT_IMAGE_NAME="2025-11-24-raspios-trixie-arm64-lite.img"
 
-# Внутренняя Точка Доступа (для ESP32)
-# Будет поднята на интерфейсе wlan1 (USB-свисток)
-AP_SSID="CoffeeMachine-Head"
-AP_PASS="connectme"
-AP_IP="192.168.50.1/24"
+; Системные настройки
+SYS_ENABLE_SSH="yes"
+SYS_USER="USERNAME"
+SYS_PASS="USERPASS"
 
-# --- Partition Sizes (MB) ---
-SIZE_BOOT=512
-SIZE_ROOT=3072
-SIZE_FACTORY=2048
-SIZE_DATA=512
+; Сеть
+NET_HOSTNAME="cdreborn-00010001"
+NET_WIFI_SSID="SSID"
+NET_WIFI_PASS="WIFI_PASSWORD"
+NET_WIFI_COUNTRY="RU"
+
+; Точка доступа (AP)
+NET_AP_SSID="CDR-00010001"
+NET_AP_PASS="AP PASSWORD"
+NET_AP_IP="192.168.50.1/24"
+
+; Размеры разделов (MB)
+PART_BOOT_SIZE=512
+PART_ROOT_A_SIZE=3072
+PART_ROOT_B_SIZE=3072
+PART_FACTORY_SIZE=2048
+PART_DATA_SIZE=512
+
+[dev]
+; === DEV MODE ===
+; Заглушки для ускорения сборки
+PART_ROOT_B_SIZE=10
+PART_FACTORY_SIZE=10
+
+[user]
+; === PROD MODE ===
+PART_ROOT_B_SIZE=3072
+PART_FACTORY_SIZE=2048
