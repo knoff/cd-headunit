@@ -6,21 +6,38 @@ log_step "04_sys_config.sh - Configuring OS Environment"
 # 1. Подготовка Chroot (Монтирование биндов)
 log_info "Mounting system binds for chroot..."
 
-# Копируем эмулятор (на случай кросс-компиляции)
 cp /usr/bin/qemu-aarch64-static /mnt/dst/usr/bin/
 
-# !!! ВАЖНО: Используем mount_bind !!!
 mount_bind /dev /mnt/dst/dev
 mount_bind /dev/pts /mnt/dst/dev/pts
 mount_bind /sys /mnt/dst/sys
 mount_bind /proc /mnt/dst/proc
 
-# Экспорт переменных внутрь
 export SYS_ENABLE_SSH SYS_USER SYS_PASS NET_HOSTNAME NET_WIFI_SSID NET_WIFI_PASS NET_WIFI_COUNTRY
 
 # ================= START CHROOT =================
 cat <<EOF | chroot /mnt/dst /bin/bash
 set -e
+
+# --- 0. ОЧИСТКА МУСОРА (CONFLICTING PACKAGES) ---
+echo "Purging conflicting packages..."
+
+# Удаляем userconf-pi (мастер настройки пользователя)
+# Удаляем cloud-init (облачная настройка, блокирующая консоль)
+apt-get remove -y --purge userconf-pi cloud-init || true
+
+# Зачистка следов systemd для надежности
+rm -f /usr/lib/systemd/system/userconf-pi.service
+rm -f /etc/systemd/system/sysinit.target.wants/userconf-pi.service
+rm -rf /usr/lib/userconf-pi
+rm -rf /etc/cloud /var/lib/cloud
+
+# Удаляем триггеры
+rm -f /boot/firmware/userconf.txt /boot/userconf.txt
+rm -f /etc/init.d/apply_noobs_os_config
+
+# Гарантируем, что консоль tty1 включена (иногда cloud-init ее отключает)
+systemctl enable getty@tty1.service
 
 # --- A. Hostname ---
 echo "Setting hostname: $NET_HOSTNAME"
@@ -49,9 +66,6 @@ if [ "$SYS_ENABLE_SSH" == "yes" ]; then
         pkill -u pi || true
         deluser --remove-home pi || true
     fi
-
-    # Фикс userconf
-    rm -f /boot/firmware/userconf.txt /boot/userconf.txt
 else
     echo "SSH disabled by config."
     systemctl disable ssh
@@ -94,7 +108,7 @@ fi
 EOF
 # ================= END CHROOT =================
 
-# 3. Уборка (Cleanup Local)
+# 3. Уборка
 log_info "Unmounting chroot binds..."
 
 rm -f /mnt/dst/usr/bin/qemu-aarch64-static
