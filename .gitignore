@@ -28,3 +28,15 @@ Thumbs.db
 .vscode/
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# OS Images and Archives
+*.img
+*.img.xz
+*.zip
+*.gz
+
+# Builder artifacts
+builder/output/
+
+# Local builder configuration
+builder/headunit.conf

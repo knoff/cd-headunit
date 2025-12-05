@@ -1,0 +1,21 @@
+# --- User Configuration ---
+USER_NAME="cdreborn"
+USER_PASS="brewme"
+
+# --- Network Configuration ---
+# Внешний Wi-Fi (клиент)
+WIFI_SSID="CoffeeShop_WiFi"
+WIFI_PASS="secretpassword"
+WIFI_COUNTRY="RU"
+
+# Внутренняя Точка Доступа (для ESP32)
+# Будет поднята на интерфейсе wlan1 (USB-свисток)
+AP_SSID="CoffeeMachine-Head"
+AP_PASS="connectme"
+AP_IP="192.168.50.1/24"
+
+# --- Partition Sizes (MB) ---
+SIZE_BOOT=512
+SIZE_ROOT=3072
+SIZE_FACTORY=2048
+SIZE_DATA=512

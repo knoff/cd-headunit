@@ -1,9 +1,0 @@
-[Plymouth Theme]
-Name=CoffeeDigital
-Description=CoffeeDigital Boot animation For Plymouth
-Comment=made by Ilia Pismenov
-ModuleName=script
-
-[script]
-ImageDir=/usr/share/plymouth/themes/coffeedigital/images
-ScriptFile=/usr/share/plymouth/themes/coffeedigital/coffeedigital.script
