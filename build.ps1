@@ -1,10 +1,7 @@
 <#
 .SYNOPSIS
     Запускает сборку образа Headunit в Docker-контейнере.
-    Использование:
-    .\build.ps1                  # Сборка dev по умолчанию
-    .\build.ps1 -Mode user       # Сборка user (продакшен)
-    .\build.ps1 -Interactive     # Вход в консоль контейнера
+    Поддерживает версионирование и замер времени.
 #>
 param(
     [string]$InputImage = "2025-11-24-raspios-trixie-arm64-lite.img",
@@ -15,34 +12,66 @@ param(
 $ErrorActionPreference = "Stop"
 $ImageName = "headunit-builder"
 
-# 1. Проверяем наличие базового образа
-if (-not (Test-Path $InputImage)) {
-    Write-Warning "Файл '$InputImage' не найден в корне. Сборка упадет на этапе копирования."
+# === 1. ИНИЦИАЛИЗАЦИЯ ТАЙМЕРА ===
+$StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host " HeadUnit OS Builder Launcher" -ForegroundColor Cyan
+Write-Host "=========================================="
+
+# === 2. ОПРЕДЕЛЕНИЕ ВЕРСИИ ===
+# Пытаемся получить версию из git tags
+try {
+    $GitVersion = git describe --tags --always --dirty 2>$null
+    if (-not $GitVersion) { throw "No version" }
+} catch {
+    $GitVersion = "dev-$(Get-Date -Format 'yyyyMMdd-HHmm')"
+    Write-Warning "Git version detection failed. Using fallback: $GitVersion"
 }
 
-# 2. Собираем Docker-образ билдера
-Write-Host ">>> Building Docker environment..." -ForegroundColor Cyan
+Write-Host "Build Version: " -NoNewline; Write-Host "$GitVersion" -ForegroundColor Green
+Write-Host "Build Mode:    " -NoNewline; Write-Host "$Mode" -ForegroundColor Yellow
+
+# === 3. ПРОВЕРКИ ===
+if (-not (Test-Path $InputImage)) {
+    Write-Warning "Файл '$InputImage' не найден. Сборка упадет на этапе копирования."
+}
+
+# === 4. СБОРКА DOCKER ОКРУЖЕНИЯ ===
+Write-Host "`n>>> [1/2] Building Docker environment..." -ForegroundColor Cyan
 docker build -t $ImageName -f builder/Dockerfile .
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-# 3. Формируем аргументы запуска Docker
-# --privileged нужен для losetup и mount
+# === 5. ЗАПУСК СБОРКИ ===
+Write-Host "`n>>> [2/2] Starting Build Container..." -ForegroundColor Cyan
+
+# Формируем аргументы
+# Передаем BUILD_VERSION внутрь контейнера
 $DockerArgs = @(
     "--rm",
     "--privileged",
     "-v", "${PWD}:/workspace",
-    "-e", "INPUT_IMAGE=$InputImage"
+    "-e", "INPUT_IMAGE=$InputImage",
+    "-e", "BUILD_VERSION=$GitVersion"
 )
 
-Write-Host ">>> Starting Container..." -ForegroundColor Cyan
-
 if ($Interactive) {
-    # Режим отладки: просто запускаем bash (CMD из Dockerfile сработает или переопределяем)
     Write-Host "Entering interactive mode..." -ForegroundColor Yellow
     docker run -it $DockerArgs $ImageName /bin/bash
 } else {
-    # Режим сборки: ЯВНО запускаем build.sh
-    Write-Host "Running Build in [$Mode] mode..." -ForegroundColor Green
-    # Обратите внимание: мы явно указываем путь к скрипту и передаем Mode как аргумент
+    # Запускаем build.sh с аргументом режима
     docker run $DockerArgs $ImageName /bin/bash builder/build.sh $Mode
 }
+
+# === 6. ИТОГИ ===
+$StopWatch.Stop()
+$TimeSpan = $StopWatch.Elapsed
+
+Write-Host "`n==========================================" -ForegroundColor Cyan
+if ($LASTEXITCODE -eq 0) {
+    Write-Host " BUILD SUCCESSFUL" -ForegroundColor Green
+} else {
+    Write-Host " BUILD FAILED" -ForegroundColor Red
+}
+Write-Host " Total Time:  $($TimeSpan.ToString("mm\:ss\.ff"))"
+Write-Host " Version:     $GitVersion"
+Write-Host "=========================================="
