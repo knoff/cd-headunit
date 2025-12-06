@@ -1,22 +1,15 @@
 <#
 .SYNOPSIS
-    Утилита сборки HeadUnit OS.
-
-.DESCRIPTION
-    Управляет Docker-контейнером сборки, версионированием и переключением веток.
-
-.EXAMPLE
-    .\build.ps1                     # Сборка текущей ветки (dev)
-    .\build.ps1 -Mode user          # Сборка текущей ветки (user/prod)
-    .\build.ps1 -ListTags           # Показать список доступных версий
-    .\build.ps1 -Checkout v0.1.0    # Собрать конкретную версию (переключиться и вернуться)
+    Smart Builder для HeadUnit OS.
+    Автоматически определяет тип изменений (OS vs App).
 #>
 param(
     [string]$InputImage = "2025-11-24-raspios-trixie-arm64-lite.img",
     [string]$Mode = "dev",
-    [string]$Checkout = $null,  # Версия для сборки (git tag)
-    [switch]$ListTags,          # Просто показать теги
-    [switch]$Interactive        # Войти в контейнер
+    [string]$Checkout = $null,
+    [switch]$ListTags,
+    [switch]$Interactive,
+    [switch]$Force # Принудительная сборка OS, даже если менялся только код
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,113 +18,132 @@ $ImageName = "headunit-builder"
 # === ФУНКЦИИ ===
 
 function Get-GitVersion {
-    try {
-        # dirty добавляет суффикс, если есть незакоммиченные изменения
-        return git describe --tags --always --dirty
-    } catch {
-        return "unknown-$(Get-Date -Format 'yyyyMMdd')"
+    try { return git describe --tags --always --dirty 2>$null } catch { return "unknown" }
+}
+
+function Get-ChangeScope {
+    # Получаем список измененных файлов (по сравнению с предыдущим коммитом или текущие изменения)
+    # Если есть незакоммиченные, смотрим их. Если нет - смотрим последний коммит.
+    $dirty = git status --porcelain
+    if ($dirty) {
+        $files = $dirty | ForEach-Object { $_.Substring(3) }
+    } else {
+        $files = git diff-tree --no-commit-id --name-only -r HEAD
     }
+
+    $os_triggers = @("builder/", "system/", "headunit.conf", "build.ps1")
+    $app_triggers = @("src/", "deploy/", "services/")
+
+    $needs_os = $false
+    $needs_app = $false
+
+    foreach ($file in $files) {
+        foreach ($trigger in $os_triggers) { if ($file -like "$trigger*") { $needs_os = $true } }
+        foreach ($trigger in $app_triggers) { if ($file -like "$trigger*") { $needs_app = $true } }
+    }
+
+    if ($needs_os) { return "OS" }
+    if ($needs_app) { return "APP" }
+    return "NONE"
 }
 
 function Assert-GitClean {
-    $status = git status --porcelain
-    if ($status) {
-        Write-Warning "!!! ВНИМАНИЕ !!!"
-        Write-Warning "У вас есть незакоммиченные изменения."
-        Write-Warning "Переключение версий невозможно в 'грязном' репозитории."
-        Write-Warning "Пожалуйста, закоммитьте (commit) или отложите (stash) изменения."
-        throw "Git working directory is dirty."
-    }
+    if (git status --porcelain) { throw "GIT_DIRTY" }
 }
 
-# === 1. РЕЖИМ СПИСКА ВЕРСИЙ ===
+# === НАЧАЛО РАБОТЫ ===
+
 if ($ListTags) {
-    Write-Host "Доступные версии (Git Tags):" -ForegroundColor Cyan
     git tag -l | Sort-Object -Descending
     exit 0
 }
 
-# === 2. ПОДГОТОВКА (ПЕРЕКЛЮЧЕНИЕ ВЕРСИИ) ===
 $OriginalBranch = $null
-$BuildVersion = $null
 
-if ($Checkout) {
-    # Если просят собрать конкретную версию, мы должны быть осторожны
-    Assert-GitClean
-
-    # Запоминаем текущую ветку/хеш
-    $OriginalBranch = git branch --show-current
-    if (-not $OriginalBranch) {
-        $OriginalBranch = git rev-parse HEAD
+try {
+    # 1. ПЕРЕКЛЮЧЕНИЕ ВЕРСИИ
+    if ($Checkout) {
+        Assert-GitClean
+        $OriginalBranch = git branch --show-current
+        if (-not $OriginalBranch) { $OriginalBranch = git rev-parse HEAD }
+        git checkout $Checkout 2>&1 | Out-Null
     }
 
-    Write-Host ">>> Switching to version: $Checkout..." -ForegroundColor Yellow
-    git checkout $Checkout
-    if ($LASTEXITCODE -ne 0) { exit 1 }
-}
+    # 2. АНАЛИЗ ИЗМЕНЕНИЙ
+    $Scope = Get-ChangeScope
 
-# Блок try/finally гарантирует, что мы вернемся на исходную ветку
-try {
-    # === 3. ИНИЦИАЛИЗАЦИЯ ===
+    if ($Force) { $Scope = "OS" }
+
+    Write-Host "==========================================" -ForegroundColor Cyan
+    Write-Host " HeadUnit Smart Builder" -ForegroundColor Cyan
+    Write-Host "=========================================="
+    Write-Host " Detected Change Scope: " -NoNewline
+
+    if ($Scope -eq "OS") {
+        Write-Host "OS LAYER (System/Builder)" -ForegroundColor Red
+        Write-Host " Action: FULL IMAGE REBUILD" -ForegroundColor Yellow
+    } elseif ($Scope -eq "APP") {
+        Write-Host "APP LAYER (Source/Config)" -ForegroundColor Green
+        Write-Host " Action: LIGHTWEIGHT UPDATE" -ForegroundColor Yellow
+    } else {
+        Write-Host "NONE / UNKNOWN" -ForegroundColor Gray
+        if (-not $Interactive) {
+            Write-Host "No relevant changes detected. Use -Force to rebuild OS."
+            exit 0
+        }
+    }
+    Write-Host "==========================================`n"
+
+    # 3. ВЕТВЛЕНИЕ ЛОГИКИ
+
+    if ($Scope -eq "APP" -and -not $Force -and -not $Interactive) {
+        Write-Host ">>> Skipping OS Build (only app changed)." -ForegroundColor Green
+        Write-Host "To deploy these changes to a device, use:" -ForegroundColor Cyan
+        Write-Host "  .\deploy.ps1 -Ip <DEVICE_IP>" -ForegroundColor White
+        Write-Host "`nTo force OS rebuild, use: .\build.ps1 -Force" -ForegroundColor Gray
+        exit 0
+    }
+
+    # 4. СБОРКА ОБРАЗА (OS LEVEL)
+    # Сюда попадаем, если Scope=OS или Force или Interactive
+
     $StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
     $BuildVersion = Get-GitVersion
-
-    # Формируем красивое имя файла: headunit-v0.1.0-user.img
-    # Заменяем запрещенные символы в версии на подчеркивание
     $SafeVersion = $BuildVersion -replace '[\\/:\*\?"<>\|]', '_'
     $TargetFileName = "headunit-${SafeVersion}-${Mode}.img"
 
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host " HeadUnit OS Builder" -ForegroundColor Cyan
-    Write-Host "=========================================="
-    Write-Host " Version:  $BuildVersion" -ForegroundColor Green
-    Write-Host " Mode:     $Mode" -ForegroundColor Yellow
-    Write-Host " Output:   $TargetFileName" -ForegroundColor Magenta
-    Write-Host "=========================================="
+    if (-not (Test-Path $InputImage)) { Write-Warning "Base image not found!" }
 
-    # === 4. ПРОВЕРКИ ===
-    if (-not (Test-Path $InputImage)) {
-        Write-Warning "Файл '$InputImage' не найден. Сборка упадет."
-    }
-
-    # === 5. DOCKER BUILD ===
-    Write-Host "`n>>> [1/2] Building Docker environment..." -ForegroundColor Cyan
-    docker build -t $ImageName -f builder/Dockerfile .
+    Write-Host ">>> [1/2] Building Builder Environment..." -ForegroundColor Cyan
+    docker build -t $ImageName -f builder/Dockerfile . | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Docker build failed" }
 
-    # === 6. ЗАПУСК СБОРКИ ===
-    Write-Host "`n>>> [2/2] Starting Build Container..." -ForegroundColor Cyan
-
+    Write-Host ">>> [2/2] Running OS Build Pipeline..." -ForegroundColor Cyan
     $DockerArgs = @(
-        "--rm",
-        "--privileged",
-        "-v", "${PWD}:/workspace",
+        "--rm", "--privileged", "-v", "${PWD}:/workspace",
         "-e", "INPUT_IMAGE=$InputImage",
         "-e", "BUILD_VERSION=$BuildVersion",
-        "-e", "TARGET_FILENAME=$TargetFileName"  # <-- Передаем имя файла
+        "-e", "TARGET_FILENAME=$TargetFileName"
     )
 
     if ($Interactive) {
-        Write-Host "Entering interactive mode..." -ForegroundColor Yellow
         docker run -it $DockerArgs $ImageName /bin/bash
     } else {
         docker run $DockerArgs $ImageName /bin/bash builder/build.sh $Mode
-        if ($LASTEXITCODE -ne 0) { throw "Build script failed" }
+        if ($LASTEXITCODE -ne 0) { throw "Build failed" }
     }
 
-    # === 7. ИТОГИ ===
     $StopWatch.Stop()
-    Write-Host "`nBuild Successful!" -ForegroundColor Green
-    Write-Host "Image: $TargetFileName"
-    Write-Host "Time:  $($StopWatch.Elapsed.ToString("mm\:ss"))"
+    Write-Host "`nOS Build Successful: $TargetFileName" -ForegroundColor Green
+    Write-Host "Time: $($StopWatch.Elapsed.ToString("mm\:ss"))"
 
 } catch {
-    Write-Error $_.Exception.Message
+    if ($_.Exception.Message -eq "GIT_DIRTY") {
+        Write-Host "`n[ERROR] Repo is dirty. Commit changes or stash them." -ForegroundColor Red
+    } else {
+        Write-Host "`n[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    }
     exit 1
 } finally {
-    # === 8. ВОЗВРАТ НА ИСХОДНУЮ (Cleanup) ===
-    if ($OriginalBranch) {
-        Write-Host "`n>>> Restoring original branch: $OriginalBranch..." -ForegroundColor Yellow
-        git checkout $OriginalBranch | Out-Null
-    }
+    if ($OriginalBranch) { git checkout $OriginalBranch 2>&1 | Out-Null }
 }
