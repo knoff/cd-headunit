@@ -1,5 +1,5 @@
 #!/bin/bash
-# STAGE 04: System Configuration (User, SSH, Network, Locales)
+# STAGE 04: System Configuration (User, SSH, Network, Locales, Fonts)
 
 log_step "04_sys_config.sh - Configuring OS Environment"
 
@@ -43,7 +43,21 @@ update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 
-# --- 2. КЛАВИАТУРА (US + RU) ---
+# --- 2. ШРИФТЫ КОНСОЛИ (Fix Squares) ---
+echo "Configuring Console Fonts (Cyrillic)..."
+# Устанавливаем пакет настройки консоли
+apt-get install -y console-setup console-setup-linux
+
+# Прописываем конфиг напрямую, чтобы setupcon подхватил его при загрузке
+cat > /etc/default/console-setup <<FONTEOF
+ACTIVE_CONSOLES="/dev/tty[1-6]"
+CHARMAP="UTF-8"
+CODESET="CyrSlav"
+FONTFACE="Terminus"
+FONTSIZE="16x32"
+FONTEOF
+
+# --- 3. КЛАВИАТУРА (US + RU) ---
 echo "Configuring Keyboard (US, RU)..."
 cat > /etc/default/keyboard <<KEYEOF
 XKBMODEL="pc105"
@@ -52,6 +66,20 @@ XKBVARIANT=","
 XKBOPTIONS="grp:ctrl_shift_toggle"
 BACKSPACE="guess"
 KEYEOF
+
+# --- 4. ФИКСАЦИЯ ИМЕН ИНТЕРФЕЙСОВ (Udev) ---
+echo "Pinning Network Interfaces..."
+# wlan0 = Встроенный (brcmfmac) -> Для AP
+# wlan1 = Внешний USB (любой USB Wi-Fi) -> Для Клиента
+
+cat > /etc/udev/rules.d/70-persistent-net.rules <<UDEVEOF
+# Internal Wi-Fi (SDIO/SoC)
+ACTION=="add", SUBSYSTEM=="net", DRIVERS=="brcmfmac", NAME="wlan0"
+
+# External Wi-Fi (USB)
+# Если устройство в подсистеме net имеет родителя в подсистеме usb - это наш клиент
+ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="usb", NAME="wlan1"
+UDEVEOF
 
 # --- A. Hostname ---
 echo "Setting hostname: $NET_HOSTNAME"
@@ -82,12 +110,9 @@ fi
 echo "Configuring Network..."
 systemctl enable NetworkManager
 
-# ВАЖНО: Отключаем конфликтующий сервис wpa_supplicant
-# NetworkManager сам запустит его, когда нужно
+# Отключаем wpa_supplicant
 systemctl disable wpa_supplicant
 systemctl stop wpa_supplicant || true
-
-# Чистим старые state-файлы NM, чтобы он не запомнил "выключенный" статус
 rm -f /var/lib/NetworkManager/NetworkManager.state
 
 # Wi-Fi Country
@@ -103,20 +128,21 @@ if [ -n "$NET_WIFI_COUNTRY" ]; then
     fi
 fi
 
-# Wi-Fi Connection
+# Wi-Fi Connection (Client)
 if [ -n "$NET_WIFI_SSID" ]; then
-    echo "Configuring Wi-Fi Client: $NET_WIFI_SSID"
+    echo "Configuring Wi-Fi Client on wlan1 (External)..."
     mkdir -p /etc/NetworkManager/system-connections
     chmod 700 /etc/NetworkManager/system-connections
 
     UUID_WIFI=\$(cat /proc/sys/kernel/random/uuid)
 
-    # Убрали interface-name=wlan0, чтобы цеплялось к любому доступному
+    # Привязываем к wlan1 (Внешний), так как мы зафиксировали имена через Udev
     cat > "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection" <<NMEOF
 [connection]
 id=preconfigured-wifi
 uuid=\$UUID_WIFI
 type=wifi
+interface-name=wlan1
 autoconnect=true
 autoconnect-priority=100
 
@@ -139,7 +165,7 @@ NMEOF
     chown root:root "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
 fi
 
-# RF Unblock Service (Force Unblock at boot)
+# RF Unblock Service
 echo "Creating rfkill-unblock service..."
 cat > /etc/systemd/system/rfkill-unblock.service <<SRVEOF
 [Unit]
