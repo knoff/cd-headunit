@@ -1,0 +1,10 @@
+# Скрываем системные и резервные разделы из пользовательского интерфейса (UDisks)
+
+# Root B (p6)
+SUBSYSTEM=="block", ENV{ID_PART_ENTRY_NUMBER}=="6", ENV{UDISKS_IGNORE}="1"
+
+# Factory (p7)
+SUBSYSTEM=="block", ENV{ID_PART_ENTRY_NUMBER}=="7", ENV{UDISKS_IGNORE}="1"
+
+# Boot (p1) - обычно и так скрыт, но на всякий случай
+SUBSYSTEM=="block", ENV{ID_PART_ENTRY_NUMBER}=="1", ENV{UDISKS_IGNORE}="1"
