@@ -12,21 +12,22 @@ mount_bind /sys /mnt/dst/sys
 mount_bind /proc /mnt/dst/proc
 
 # 2. Копирование системных конфигов (Injection)
+# Берем файлы из папки system/ репозитория
 log_info "Injecting system configurations..."
 
-# Udev Rules (Network Naming)
+# Udev Rules (Network Naming wlan0/wlan1)
 cp -v "$WORKSPACE_DIR/system/udev/70-persistent-net.rules" /mnt/dst/etc/udev/rules.d/
 
-# Systemd Services (RFKill)
+# Systemd Services (RFKill Unblocker)
 cp -v "$WORKSPACE_DIR/system/systemd/rfkill-unblock.service" /mnt/dst/etc/systemd/system/
 
 # Console & Keyboard Defaults
-# (Эти файлы мы создали в system/boot, копируем их в /etc/default)
 cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
 cp -v "$WORKSPACE_DIR/system/boot/console-setup" /mnt/dst/etc/default/console-setup
 
 # 3. Вход в систему (Chroot)
 export SYS_ENABLE_SSH SYS_USER SYS_PASS NET_HOSTNAME NET_WIFI_SSID NET_WIFI_PASS NET_WIFI_COUNTRY
+export BUILD_VERSION BUILD_MODE
 
 cat <<EOF | chroot /mnt/dst /bin/bash
 set -e
@@ -87,7 +88,7 @@ systemctl disable wpa_supplicant
 systemctl stop wpa_supplicant || true
 rm -f /var/lib/NetworkManager/NetworkManager.state
 
-# Включаем наш RFKill сервис
+# Включаем наш RFKill сервис (файл скопирован выше)
 systemctl enable rfkill-unblock.service
 systemctl unmask systemd-rfkill.service || true
 
@@ -104,6 +105,7 @@ if [ -n "$NET_WIFI_COUNTRY" ]; then
 fi
 
 # Wi-Fi Connection Profile (Client -> wlan1)
+# Этот файл мы генерируем тут, так как в нем секреты из ENV
 if [ -n "$NET_WIFI_SSID" ]; then
     echo "Configuring Wi-Fi Client on wlan1..."
     mkdir -p /etc/NetworkManager/system-connections
@@ -138,6 +140,32 @@ NMEOF
     chmod 600 "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
     chown root:root "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
 fi
+
+# --- Д. ВЕРСИОНИРОВАНИЕ ---
+echo "Stamping System Version: $BUILD_VERSION"
+
+# 1. Основной файл релиза (стандарт Systemd)
+cat > /etc/headunit-release <<VEREOF
+NAME="HeadUnit OS"
+ID=headunit
+VERSION_ID="$BUILD_VERSION"
+PRETTY_NAME="HeadUnit OS $BUILD_VERSION ($BUILD_MODE)"
+BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+HOME_URL="https://github.com/cdreborn/headunit"
+VEREOF
+
+# 2. Файл-флаг для приложений (JSON)
+mkdir -p /opt/headunit
+cat > /opt/headunit/version.json <<JSONEOF
+{
+  "os_version": "$BUILD_VERSION",
+  "build_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "build_mode": "$BUILD_MODE"
+}
+JSONEOF
+
+# 3. MOTD
+echo "Welcome to HeadUnit OS $BUILD_VERSION" > /etc/motd
 
 EOF
 
