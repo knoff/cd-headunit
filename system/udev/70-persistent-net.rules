@@ -1,0 +1,5 @@
+# Internal Wi-Fi (SDIO/SoC) -> AP
+ACTION=="add", SUBSYSTEM=="net", DRIVERS=="brcmfmac", NAME="wlan0"
+
+# External Wi-Fi (USB) -> Client
+ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="usb", NAME="wlan1"

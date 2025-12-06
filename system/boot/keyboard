@@ -1,0 +1,5 @@
+XKBMODEL="pc105"
+XKBLAYOUT="us,ru"
+XKBVARIANT=","
+XKBOPTIONS="grp:ctrl_shift_toggle"
+BACKSPACE="guess"

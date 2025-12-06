@@ -8,7 +8,15 @@ log_step "01_make_image.sh - Creating Disk Image"
 TOTAL_SIZE=$((PART_BOOT_SIZE + PART_ROOT_A_SIZE + PART_ROOT_B_SIZE + PART_FACTORY_SIZE + PART_DATA_SIZE + 50))
 
 OUTPUT_FILE="${WORKSPACE_DIR}/${IMAGE_NAME}-${BUILD_MODE}.img"
-log_info "Target Image Size: ${TOTAL_SIZE} MB"
+if [ -n "$TARGET_FILENAME" ]; then
+    OUTPUT_FILE="${WORKSPACE_DIR}/${TARGET_FILENAME}"
+else
+    OUTPUT_FILE="${WORKSPACE_DIR}/${IMAGE_NAME}-${BUILD_MODE}.img"
+fi
+# =======================
+
+log_info "Target Image: $OUTPUT_FILE"
+log_info "Target Size: ${TOTAL_SIZE} MB"
 log_info "Layout: Boot=${PART_BOOT_SIZE}, A=${PART_ROOT_A_SIZE}, B=${PART_ROOT_B_SIZE}, Fact=${PART_FACTORY_SIZE}, Data=${PART_DATA_SIZE}"
 
 # 2. Создание пустого файла
