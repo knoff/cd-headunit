@@ -33,26 +33,17 @@ systemctl enable getty@tty1.service
 
 # --- 1. ЛОКАЛИЗАЦИЯ (Dual Locale) ---
 echo "Generating Locales (en_US & ru_RU)..."
-
-# Убеждаемся, что пакет установлен
 apt-get install -y locales
-
-# Прописываем две нужные локали. Все остальные будут удалены (не сгенерированы).
 cat > /etc/locale.gen <<LOCALEEOF
 en_US.UTF-8 UTF-8
 ru_RU.UTF-8 UTF-8
 LOCALEEOF
-
-# Генерируем
 locale-gen
-
-# Дефолт - английский (для логов), русский доступен
 update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-
 export LANG=en_US.UTF-8
 export LC_ALL=en_US.UTF-8
 
-# --- 2. КЛАВИАТУРА (US + RU, Ctrl+Shift) ---
+# --- 2. КЛАВИАТУРА (US + RU) ---
 echo "Configuring Keyboard (US, RU)..."
 cat > /etc/default/keyboard <<KEYEOF
 XKBMODEL="pc105"
@@ -91,6 +82,14 @@ fi
 echo "Configuring Network..."
 systemctl enable NetworkManager
 
+# ВАЖНО: Отключаем конфликтующий сервис wpa_supplicant
+# NetworkManager сам запустит его, когда нужно
+systemctl disable wpa_supplicant
+systemctl stop wpa_supplicant || true
+
+# Чистим старые state-файлы NM, чтобы он не запомнил "выключенный" статус
+rm -f /var/lib/NetworkManager/NetworkManager.state
+
 # Wi-Fi Country
 if [ -n "$NET_WIFI_COUNTRY" ]; then
     echo "Setting WiFi Country to $NET_WIFI_COUNTRY..."
@@ -112,12 +111,12 @@ if [ -n "$NET_WIFI_SSID" ]; then
 
     UUID_WIFI=\$(cat /proc/sys/kernel/random/uuid)
 
+    # Убрали interface-name=wlan0, чтобы цеплялось к любому доступному
     cat > "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection" <<NMEOF
 [connection]
 id=preconfigured-wifi
 uuid=\$UUID_WIFI
 type=wifi
-interface-name=wlan0
 autoconnect=true
 autoconnect-priority=100
 
@@ -140,9 +139,25 @@ NMEOF
     chown root:root "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
 fi
 
-# RF Unblock
+# RF Unblock Service (Force Unblock at boot)
+echo "Creating rfkill-unblock service..."
+cat > /etc/systemd/system/rfkill-unblock.service <<SRVEOF
+[Unit]
+Description=RFKill-Unblock All Devices
+After=systemd-rfkill.service
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/rfkill unblock all
+ExecStartPost=/bin/sleep 1
+
+[Install]
+WantedBy=multi-user.target
+SRVEOF
+
+systemctl enable rfkill-unblock.service
 systemctl unmask systemd-rfkill.service || true
-systemctl unmask systemd-rfkill.socket || true
 
 EOF
 # ================= END CHROOT =================
