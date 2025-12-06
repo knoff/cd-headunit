@@ -1,93 +1,64 @@
 #!/bin/bash
-# STAGE 04: System Configuration (User, SSH, Network, Locales, Fonts)
+# STAGE 04: System Configuration (User, Network, Locales, Services)
 
 log_step "04_sys_config.sh - Configuring OS Environment"
 
-# 1. Подготовка Chroot
+# 1. Подготовка (Монтирование биндов)
 log_info "Mounting system binds for chroot..."
-
 cp /usr/bin/qemu-aarch64-static /mnt/dst/usr/bin/
-
 mount_bind /dev /mnt/dst/dev
 mount_bind /dev/pts /mnt/dst/dev/pts
 mount_bind /sys /mnt/dst/sys
 mount_bind /proc /mnt/dst/proc
 
+# 2. Копирование системных конфигов (Injection)
+log_info "Injecting system configurations..."
+
+# Udev Rules (Network Naming)
+cp -v "$WORKSPACE_DIR/system/udev/70-persistent-net.rules" /mnt/dst/etc/udev/rules.d/
+
+# Systemd Services (RFKill)
+cp -v "$WORKSPACE_DIR/system/systemd/rfkill-unblock.service" /mnt/dst/etc/systemd/system/
+
+# Console & Keyboard Defaults
+# (Эти файлы мы создали в system/boot, копируем их в /etc/default)
+cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
+cp -v "$WORKSPACE_DIR/system/boot/console-setup" /mnt/dst/etc/default/console-setup
+
+# 3. Вход в систему (Chroot)
 export SYS_ENABLE_SSH SYS_USER SYS_PASS NET_HOSTNAME NET_WIFI_SSID NET_WIFI_PASS NET_WIFI_COUNTRY
 
-# ================= START CHROOT =================
 cat <<EOF | chroot /mnt/dst /bin/bash
 set -e
 
-# --- 0. ОЧИСТКА МУСОРА ---
+# --- А. ОЧИСТКА ---
 echo "Purging First-Run Wizards..."
 apt-get remove -y --purge userconf-pi cloud-init || true
 rm -f /usr/lib/systemd/system/userconf-pi.service
-rm -f /etc/systemd/system/sysinit.target.wants/userconf-pi.service
-rm -rf /usr/lib/userconf-pi
-rm -rf /etc/cloud /var/lib/cloud
+rm -rf /usr/lib/userconf-pi /etc/cloud /var/lib/cloud
 rm -f /boot/firmware/userconf.txt /boot/userconf.txt
 rm -f /etc/init.d/apply_noobs_os_config
 
 systemctl enable getty@tty1.service
 
-# --- 1. ЛОКАЛИЗАЦИЯ (Dual Locale) ---
-echo "Generating Locales (en_US & ru_RU)..."
-apt-get install -y locales
+# --- Б. ЛОКАЛИЗАЦИЯ ---
+echo "Generating Locales..."
+apt-get install -y locales console-setup console-setup-linux
+
+# Генерируем локали
 cat > /etc/locale.gen <<LOCALEEOF
 en_US.UTF-8 UTF-8
 ru_RU.UTF-8 UTF-8
 LOCALEEOF
 locale-gen
 update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
 
-# --- 2. ШРИФТЫ КОНСОЛИ (Fix Squares) ---
-echo "Configuring Console Fonts (Cyrillic)..."
-# Устанавливаем пакет настройки консоли
-apt-get install -y console-setup console-setup-linux
-
-# Прописываем конфиг напрямую, чтобы setupcon подхватил его при загрузке
-cat > /etc/default/console-setup <<FONTEOF
-ACTIVE_CONSOLES="/dev/tty[1-6]"
-CHARMAP="UTF-8"
-CODESET="CyrSlav"
-FONTFACE="Terminus"
-FONTSIZE="16x32"
-FONTEOF
-
-# --- 3. КЛАВИАТУРА (US + RU) ---
-echo "Configuring Keyboard (US, RU)..."
-cat > /etc/default/keyboard <<KEYEOF
-XKBMODEL="pc105"
-XKBLAYOUT="us,ru"
-XKBVARIANT=","
-XKBOPTIONS="grp:ctrl_shift_toggle"
-BACKSPACE="guess"
-KEYEOF
-
-# --- 4. ФИКСАЦИЯ ИМЕН ИНТЕРФЕЙСОВ (Udev) ---
-echo "Pinning Network Interfaces..."
-# wlan0 = Встроенный (brcmfmac) -> Для AP
-# wlan1 = Внешний USB (любой USB Wi-Fi) -> Для Клиента
-
-cat > /etc/udev/rules.d/70-persistent-net.rules <<UDEVEOF
-# Internal Wi-Fi (SDIO/SoC)
-ACTION=="add", SUBSYSTEM=="net", DRIVERS=="brcmfmac", NAME="wlan0"
-
-# External Wi-Fi (USB)
-# Если устройство в подсистеме net имеет родителя в подсистеме usb - это наш клиент
-ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="usb", NAME="wlan1"
-UDEVEOF
-
-# --- A. Hostname ---
+# --- В. ПОЛЬЗОВАТЕЛИ ---
 echo "Setting hostname: $NET_HOSTNAME"
 echo "$NET_HOSTNAME" > /etc/hostname
 echo "127.0.0.1 localhost" > /etc/hosts
 echo "127.0.1.1 $NET_HOSTNAME" >> /etc/hosts
 
-# --- B. Пользователь и SSH ---
 if [ "$SYS_ENABLE_SSH" == "yes" ]; then
     echo "Enabling SSH..."
     systemctl enable ssh
@@ -98,6 +69,7 @@ if [ "$SYS_ENABLE_SSH" == "yes" ]; then
     echo "$SYS_USER:$SYS_PASS" | chpasswd
     echo "root:$SYS_PASS" | chpasswd
 
+    # Удаляем pi
     if [ "$SYS_USER" != "pi" ] && id "pi" &>/dev/null; then
         pkill -u pi || true
         deluser --remove-home pi || true
@@ -106,18 +78,21 @@ else
     systemctl disable ssh
 fi
 
-# --- C. Настройка Сети ---
+# --- Г. СЕТЬ И СЕРВИСЫ ---
 echo "Configuring Network..."
 systemctl enable NetworkManager
 
-# Отключаем wpa_supplicant
+# Отключаем конфликтный wpa_supplicant (системный)
 systemctl disable wpa_supplicant
 systemctl stop wpa_supplicant || true
 rm -f /var/lib/NetworkManager/NetworkManager.state
 
-# Wi-Fi Country
+# Включаем наш RFKill сервис
+systemctl enable rfkill-unblock.service
+systemctl unmask systemd-rfkill.service || true
+
+# Wi-Fi Country (для драйвера)
 if [ -n "$NET_WIFI_COUNTRY" ]; then
-    echo "Setting WiFi Country to $NET_WIFI_COUNTRY..."
     mkdir -p /etc/wpa_supplicant
     echo "country=$NET_WIFI_COUNTRY" > /etc/wpa_supplicant/wpa_supplicant.conf
     echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev" >> /etc/wpa_supplicant/wpa_supplicant.conf
@@ -128,15 +103,14 @@ if [ -n "$NET_WIFI_COUNTRY" ]; then
     fi
 fi
 
-# Wi-Fi Connection (Client)
+# Wi-Fi Connection Profile (Client -> wlan1)
 if [ -n "$NET_WIFI_SSID" ]; then
-    echo "Configuring Wi-Fi Client on wlan1 (External)..."
+    echo "Configuring Wi-Fi Client on wlan1..."
     mkdir -p /etc/NetworkManager/system-connections
     chmod 700 /etc/NetworkManager/system-connections
 
     UUID_WIFI=\$(cat /proc/sys/kernel/random/uuid)
 
-    # Привязываем к wlan1 (Внешний), так как мы зафиксировали имена через Udev
     cat > "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection" <<NMEOF
 [connection]
 id=preconfigured-wifi
@@ -165,30 +139,9 @@ NMEOF
     chown root:root "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
 fi
 
-# RF Unblock Service
-echo "Creating rfkill-unblock service..."
-cat > /etc/systemd/system/rfkill-unblock.service <<SRVEOF
-[Unit]
-Description=RFKill-Unblock All Devices
-After=systemd-rfkill.service
-Before=NetworkManager.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/rfkill unblock all
-ExecStartPost=/bin/sleep 1
-
-[Install]
-WantedBy=multi-user.target
-SRVEOF
-
-systemctl enable rfkill-unblock.service
-systemctl unmask systemd-rfkill.service || true
-
 EOF
-# ================= END CHROOT =================
 
-# 3. Уборка
+# 4. Уборка
 log_info "Unmounting chroot binds..."
 rm -f /mnt/dst/usr/bin/qemu-aarch64-static
 umount_safe /mnt/dst/proc
