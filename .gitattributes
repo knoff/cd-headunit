@@ -1,10 +1,25 @@
-* text=auto
-*.sh text eol=lf
-*.yaml text eol=lf
-*.yml  text eol=lf
-*.json text eol=lf
-*.md   text eol=lf
-*.c    text eol=lf
-*.cpp  text eol=lf
-*.h    text eol=lf
-*.hpp  text eol=lf
+# --- DEFAULT BEHAVIOR ---
+# text=auto: Git сам определяет, текстовый файл или бинарный.
+# eol=lf:    Если файл текстовый, ВСЕГДА использовать LF (Unix).
+* text=auto eol=lf
+
+# --- EXPLICIT BINARY ---
+# Явно помечаем бинарники, чтобы Git не пытался менять в них байты
+# (Хотя text=auto обычно справляется, лучше перестраховаться)
+*.img     binary
+*.gz      binary
+*.zip     binary
+*.tar     binary
+*.pyc     binary
+*.png     binary
+*.jpg     binary
+*.ico     binary
+*.ttf     binary
+*.woff    binary
+*.woff2   binary
+
+# --- WINDOWS SCRIPTS ---
+# Если вдруг понадобятся батники, им нужен CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+# PowerShell (ps1) отлично понимает LF, так что оставляем по умолчанию (LF)

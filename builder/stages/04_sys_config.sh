@@ -1,9 +1,9 @@
 #!/bin/bash
-# STAGE 04: System Configuration (Custom Initramfs Hook + Python Fix)
+# STAGE 04: System Configuration (Optimized Package Management + Font Fix)
 
 log_step "04_sys_config.sh - Configuring OS Environment"
 
-# 1. Подготовка
+# 1. Подготовка (Binds)
 log_info "Mounting system binds..."
 cp /usr/bin/qemu-aarch64-static /mnt/dst/usr/bin/
 mount_bind /dev /mnt/dst/dev
@@ -11,16 +11,24 @@ mount_bind /dev/pts /mnt/dst/dev/pts
 mount_bind /sys /mnt/dst/sys
 mount_bind /proc /mnt/dst/proc
 
-# 2. Инъекция
+# 2. Инъекция конфигов
+log_info "Injecting configurations..."
 cp -v "$WORKSPACE_DIR/system/udev/70-persistent-net.rules" /mnt/dst/etc/udev/rules.d/
 cp -v "$WORKSPACE_DIR/system/udev/99-hide-partitions.rules" /mnt/dst/etc/udev/rules.d/
 cp -v "$WORKSPACE_DIR/system/systemd/rfkill-unblock.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
-cp -v "$WORKSPACE_DIR/system/boot/console-setup" /mnt/dst/etc/default/console-setup
+# console-setup не копируем, создадим его с нуля ниже с правильным CODESET
 
-# Подготовка скрипта оверлея
+# Скрипт оверлея
 mkdir -p /mnt/dst/tmp/overlay_script
 cp -v "$WORKSPACE_DIR/system/scripts/overlay-init" /mnt/dst/tmp/overlay_script/overlay
+
+if command -v dos2unix >/dev/null 2>&1; then
+    dos2unix /mnt/dst/tmp/overlay_script/overlay
+else
+    # Fallback если dos2unix нет на хосте, используем sed
+    sed -i 's/\r$//' /mnt/dst/tmp/overlay_script/overlay
+fi
 
 # 3. Data папки
 mkdir -p /mnt/dst/data/app
@@ -34,34 +42,56 @@ export BUILD_VERSION BUILD_MODE
 cat <<EOF | chroot /mnt/dst /bin/bash
 set -e
 
-# --- A. ОЧИСТКА ---
-# Удаляем только конкретные пакеты, НЕ трогаем зависимости (Python)
+# Отключаем интерактивность для чистого лога
+export DEBIAN_FRONTEND=noninteractive
+
+# === БЛОК 1: УПРАВЛЕНИЕ ПАКЕТАМИ ===
+echo ">>> Managing Packages..."
+
+apt-get update
+
+# Удаление лишнего
 apt-get remove -y userconf-pi cloud-init dphys-swapfile || true
 rm -rf /usr/lib/userconf-pi /etc/cloud /var/lib/cloud /var/swap
 
+# Установка зависимостей
+# ВАЖНО: fonts-terminus обеспечивает шрифт, Uni2 требует console-setup
+echo "Installing dependencies..."
+apt-get install -y --no-install-recommends \
+    initramfs-tools \
+    zram-tools \
+    locales \
+    console-setup \
+    console-common \
+    console-data \
+    fonts-terminus \
+    kbd \
+    busybox-static \
+    bc
+
+# Очистка
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+
+# Отключение сервисов
 systemctl disable apt-daily.timer apt-daily-upgrade.timer man-db.timer
 systemctl mask rpi-resize.service systemd-growfs-root.service rpi-resize-swap-file.service
 
-# --- Б. INITRAMFS СБОРКА ---
-echo "Building Custom Initramfs..."
-apt-get update
-# Добавляем шрифты, чтобы setupcon не ругался
-apt-get install -y initramfs-tools locales console-setup kbd busybox-static console-data
+# === БЛОК 2: НАСТРОЙКА ПОДСИСТЕМ ===
 
-# 1. Модуль
-echo "overlay" >> /etc/initramfs-tools/modules
+# --- A. INITRAMFS & OVERLAY ---
+echo "Configuring Initramfs..."
+if ! grep -q "overlay" /etc/initramfs-tools/modules; then
+    echo "overlay" >> /etc/initramfs-tools/modules
+fi
 
-# 2. Установка скрипта в init-bottom
 chmod +x /tmp/overlay_script/overlay
 mv /tmp/overlay_script/overlay /etc/initramfs-tools/scripts/init-bottom/overlay
 
-# 3. Генерация для целевого ядра
 TARGET_KERNEL=\$(ls /lib/modules | sort -V | tail -n 1)
-echo "Kernel: \$TARGET_KERNEL"
-
+echo "Generating initramfs for \$TARGET_KERNEL..."
 update-initramfs -c -k "\$TARGET_KERNEL"
 
-# 4. Деплой
 if [ -f "/boot/initrd.img-\$TARGET_KERNEL" ]; then
     cp "/boot/initrd.img-\$TARGET_KERNEL" /boot/firmware/initramfs8
 else
@@ -69,18 +99,16 @@ else
     exit 1
 fi
 
-# --- В. ZRAM ---
-apt-get install -y zram-tools
+# --- B. ZRAM ---
+echo "Configuring ZRAM..."
 cat > /etc/default/zramswap <<ZRAMEOF
 ALGO=zstd
 PERCENT=50
 PRIORITY=100
 ZRAMEOF
 
-# --- Г. СТАНДАРТНЫЕ НАСТРОЙКИ ---
-
-echo "Generating Locales..."
-apt-get install -y locales console-setup console-setup-linux
+# --- C. LOCALES & CONSOLE ---
+echo "Configuring Locales..."
 cat > /etc/locale.gen <<LOCALEEOF
 en_US.UTF-8 UTF-8
 ru_RU.UTF-8 UTF-8
@@ -88,10 +116,22 @@ LOCALEEOF
 locale-gen
 update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 
-# Console (Применяем настройки, шрифты уже установлены)
+# Console Setup
+# ИСПРАВЛЕНИЕ: Uni2 вместо Guess. Uni2 = Universal (Latin + Cyrillic).
+cat > /etc/default/console-setup <<FONTEOF
+ACTIVE_CONSOLES="/dev/tty[1-6]"
+CHARMAP="UTF-8"
+CODESET="Uni2"
+FONTFACE="Terminus"
+FONTSIZE="16x32"
+FONTEOF
+
+# Применяем настройки
+# --save-only сгенерирует файлы в /etc/console-setup
 setupcon --save-only
 
-# Hostname & User
+# --- D. USER & NETWORK ---
+echo "Configuring System..."
 echo "$NET_HOSTNAME" > /etc/hostname
 echo "127.0.0.1 localhost" > /etc/hosts
 echo "127.0.1.1 $NET_HOSTNAME" >> /etc/hosts
@@ -110,7 +150,6 @@ if [ "$SYS_ENABLE_SSH" == "yes" ]; then
     fi
 fi
 
-# Network
 systemctl enable NetworkManager
 systemctl disable wpa_supplicant
 systemctl stop wpa_supplicant || true
@@ -151,7 +190,7 @@ NMEOF
     chown root:root "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
 fi
 
-# Docker Log Limits
+# --- E. DOCKER LOGS ---
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<DOCKERCONF
 {
@@ -163,7 +202,7 @@ cat > /etc/docker/daemon.json <<DOCKERCONF
 }
 DOCKERCONF
 
-# Versioning
+# --- F. VERSIONING ---
 cat > /etc/headunit-release <<VEREOF
 NAME="HeadUnit OS"
 ID=headunit
@@ -185,7 +224,7 @@ echo "Welcome to HeadUnit OS $BUILD_VERSION" > /etc/motd
 
 EOF
 
-# 4. Уборка
+# 5. Уборка
 rm -f /mnt/dst/usr/bin/qemu-aarch64-static
 umount_safe /mnt/dst/proc
 umount_safe /mnt/dst/sys
