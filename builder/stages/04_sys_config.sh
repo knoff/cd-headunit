@@ -1,5 +1,5 @@
 #!/bin/bash
-# STAGE 04: System Configuration (Hardening & RO Prep)
+# STAGE 04: System Configuration (Custom Initramfs Hook + Python Fix)
 
 log_step "04_sys_config.sh - Configuring OS Environment"
 
@@ -11,24 +11,21 @@ mount_bind /dev/pts /mnt/dst/dev/pts
 mount_bind /sys /mnt/dst/sys
 mount_bind /proc /mnt/dst/proc
 
-# 2. Инъекция конфигов
-log_info "Injecting system configurations..."
-
-# Udev Rules (Network + Hiding Partitions)
+# 2. Инъекция
 cp -v "$WORKSPACE_DIR/system/udev/70-persistent-net.rules" /mnt/dst/etc/udev/rules.d/
 cp -v "$WORKSPACE_DIR/system/udev/99-hide-partitions.rules" /mnt/dst/etc/udev/rules.d/
-
-# Services & Boot configs
 cp -v "$WORKSPACE_DIR/system/systemd/rfkill-unblock.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
 cp -v "$WORKSPACE_DIR/system/boot/console-setup" /mnt/dst/etc/default/console-setup
 
-# 3. Подготовка структуры данных (/data)
-# Создаем папки, которые будут на RW разделе
-mkdir -p /mnt/dst/data/system
+# Подготовка скрипта оверлея
+mkdir -p /mnt/dst/tmp/overlay_script
+cp -v "$WORKSPACE_DIR/system/scripts/overlay-init" /mnt/dst/tmp/overlay_script/overlay
+
+# 3. Data папки
 mkdir -p /mnt/dst/data/app
-mkdir -p /mnt/dst/data/docker
-mkdir -p /mnt/dst/data/logs_archive
+mkdir -p /mnt/dst/data/configs
+mkdir -p /mnt/dst/data/db
 
 # 4. CHROOT
 export SYS_ENABLE_SSH SYS_USER SYS_PASS NET_HOSTNAME NET_WIFI_SSID NET_WIFI_PASS NET_WIFI_COUNTRY
@@ -37,52 +34,50 @@ export BUILD_VERSION BUILD_MODE
 cat <<EOF | chroot /mnt/dst /bin/bash
 set -e
 
-# --- A. УДАЛЕНИЕ ЛИШНЕГО ---
-echo "Purging unnecessary services..."
-apt-get remove -y --purge userconf-pi cloud-init dphys-swapfile logrotate triggerhappy || true
-apt-get autoremove -y
+# --- A. ОЧИСТКА ---
+# Удаляем только конкретные пакеты, НЕ трогаем зависимости (Python)
+apt-get remove -y userconf-pi cloud-init dphys-swapfile || true
 rm -rf /usr/lib/userconf-pi /etc/cloud /var/lib/cloud /var/swap
 
-# Отключаем apt-daily таймеры (они вызывают нагрузку на диск и ошибки в RO)
-systemctl disable apt-daily.timer
-systemctl disable apt-daily-upgrade.timer
-systemctl disable man-db.timer
+systemctl disable apt-daily.timer apt-daily-upgrade.timer man-db.timer
+systemctl mask rpi-resize.service systemd-growfs-root.service rpi-resize-swap-file.service
 
-# --- Б. RO FIXES (Симлинки и хаки) ---
-echo "Applying Read-Only Fixes..."
+# --- Б. INITRAMFS СБОРКА ---
+echo "Building Custom Initramfs..."
+apt-get update
+# Добавляем шрифты, чтобы setupcon не ругался
+apt-get install -y initramfs-tools locales console-setup kbd busybox-static console-data
 
-# 1. DNS (Resolv.conf)
-# NetworkManager пишет сюда. Переносим в tmpfs (/run)
-rm -f /etc/resolv.conf
-ln -s /run/NetworkManager/resolv.conf /etc/resolv.conf
+# 1. Модуль
+echo "overlay" >> /etc/initramfs-tools/modules
 
-# 2. Random Seed (Энтропия)
-# systemd-random-seed пытается писать в /var/lib/systemd/random-seed при выключении
-# Переносим это на /data, чтобы энтропия сохранялась
-rm -f /var/lib/systemd/random-seed
-# Ссылка будет работать, когда /data смонтируется
-ln -s /data/system/random-seed /var/lib/systemd/random-seed
+# 2. Установка скрипта в init-bottom
+chmod +x /tmp/overlay_script/overlay
+mv /tmp/overlay_script/overlay /etc/initramfs-tools/scripts/init-bottom/overlay
 
-# 3. База данных NetworkManager (Leases, timestamps)
-# По умолчанию в /var/lib/NetworkManager. Переносим в tmpfs или /data.
-# Лучше в tmpfs (забываем сети при ребуте) или /data (помним).
-# Выберем /data для стабильности.
-rm -rf /var/lib/NetworkManager
-ln -s /data/system/nm-state /var/lib/NetworkManager
-mkdir -p /data/system/nm-state
+# 3. Генерация для целевого ядра
+TARGET_KERNEL=\$(ls /lib/modules | sort -V | tail -n 1)
+echo "Kernel: \$TARGET_KERNEL"
 
-# 4. SSH Host Keys
-# Ключи хоста должны быть постоянными! Иначе при каждой загрузке будет "Man in the middle attack" warning.
-# Перемещаем ключи генерации на /data
-# (Скрипт генерации ключей ssh нужно будет подправить или оставить как есть, если он увидит ключи)
-# Пока оставим в /etc/ssh (RO). Они сгенерируются один раз при ПЕРВОЙ загрузке?
-# НЕТ! При первой загрузке корень уже RO. Ключи не создадутся.
-# РЕШЕНИЕ: Генерируем ключи ПРЯМО СЕЙЧАС при сборке.
-echo "Pre-generating SSH Host Keys..."
-ssh-keygen -A
+update-initramfs -c -k "\$TARGET_KERNEL"
 
-# --- В. СТАНДАРТНАЯ НАСТРОЙКА (Локаль, Сеть, Юзеры) ---
-# (Этот блок остается таким же, как был, только без создания файлов в /etc/...)
+# 4. Деплой
+if [ -f "/boot/initrd.img-\$TARGET_KERNEL" ]; then
+    cp "/boot/initrd.img-\$TARGET_KERNEL" /boot/firmware/initramfs8
+else
+    echo "ERROR: Initramfs failed"
+    exit 1
+fi
+
+# --- В. ZRAM ---
+apt-get install -y zram-tools
+cat > /etc/default/zramswap <<ZRAMEOF
+ALGO=zstd
+PERCENT=50
+PRIORITY=100
+ZRAMEOF
+
+# --- Г. СТАНДАРТНЫЕ НАСТРОЙКИ ---
 
 echo "Generating Locales..."
 apt-get install -y locales console-setup console-setup-linux
@@ -93,7 +88,10 @@ LOCALEEOF
 locale-gen
 update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 
-echo "Setting hostname: $NET_HOSTNAME"
+# Console (Применяем настройки, шрифты уже установлены)
+setupcon --save-only
+
+# Hostname & User
 echo "$NET_HOSTNAME" > /etc/hostname
 echo "127.0.0.1 localhost" > /etc/hosts
 echo "127.0.1.1 $NET_HOSTNAME" >> /etc/hosts
@@ -112,12 +110,11 @@ if [ "$SYS_ENABLE_SSH" == "yes" ]; then
     fi
 fi
 
-echo "Configuring Network..."
+# Network
 systemctl enable NetworkManager
 systemctl disable wpa_supplicant
 systemctl stop wpa_supplicant || true
 rm -f /var/lib/NetworkManager/NetworkManager.state
-
 systemctl enable rfkill-unblock.service
 systemctl unmask systemd-rfkill.service || true
 
@@ -154,7 +151,19 @@ NMEOF
     chown root:root "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
 fi
 
-# --- Г. ВЕРСИОНИРОВАНИЕ ---
+# Docker Log Limits
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json <<DOCKERCONF
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "2m",
+    "max-file": "2"
+  }
+}
+DOCKERCONF
+
+# Versioning
 cat > /etc/headunit-release <<VEREOF
 NAME="HeadUnit OS"
 ID=headunit
@@ -183,4 +192,4 @@ umount_safe /mnt/dst/sys
 umount_safe /mnt/dst/dev/pts
 umount_safe /mnt/dst/dev
 
-log_info "OS Hardening Complete."
+log_info "OS Configuration Complete."

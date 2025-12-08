@@ -1,0 +1,100 @@
+#!/bin/sh
+
+# Стандартный заголовок initramfs
+PREREQ=""
+prereqs()
+{
+    echo "$PREREQ"
+}
+
+case $1 in
+prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+. /scripts/functions
+
+# 1. Загружаем модуль (на всякий случай)
+modprobe overlay
+
+# Ждем диски
+wait_for_udev 10
+
+# 2. Ищем раздел DATA
+# Сначала пробуем по метке
+DATA_DEV="/dev/disk/by-label/data"
+
+if [ ! -e "$DATA_DEV" ]; then
+    # Если метки нет, ищем по аналогии с корнем
+    # Читаем cmdline, чтобы найти текущий root
+    for x in $(cat /proc/cmdline); do
+        case $x in
+        root=PARTUUID=*)
+            UUID="${x#root=PARTUUID=}"
+            ROOT_DEV="/dev/disk/by-partuuid/$UUID"
+            ;;
+        root=/dev/*)
+            ROOT_DEV="${x#root=}"
+            ;;
+        esac
+    done
+
+    # Разрешаем симлинк
+    if [ -L "$ROOT_DEV" ]; then
+        ROOT_DEV=$(readlink -f "$ROOT_DEV")
+    fi
+
+    # Если root=/dev/mmcblk0p5, то data=/dev/mmcblk0p8
+    DISK_DEV=${ROOT_DEV%p*}
+    DATA_DEV="${DISK_DEV}p8"
+fi
+
+if [ ! -e "$DATA_DEV" ]; then
+    echo "OVERLAY: Data partition not found. Booting Read-Only without persistence."
+    exit 0
+fi
+
+# 3. Определяем слот (A/B) для изоляции данных
+CURRENT_SLOT="main"
+case "$ROOT_DEV" in
+    *p5) CURRENT_SLOT="slot_a" ;;
+    *p6) CURRENT_SLOT="slot_b" ;;
+esac
+
+# 4. Монтируем
+RW_MOUNT="/mnt/data"
+RO_MOUNT="/mnt/root-ro"
+OVERLAY_BASE="$RW_MOUNT/overlays/$CURRENT_SLOT"
+UPPER_DIR="$OVERLAY_BASE/upper"
+WORK_DIR="$OVERLAY_BASE/work"
+
+mkdir -p $RW_MOUNT $RO_MOUNT
+
+# Монтируем Data (RW)
+mount -t ext4 -o noatime,commit=600 $DATA_DEV $RW_MOUNT
+if [ $? -ne 0 ]; then
+    echo "OVERLAY: Failed to mount Data. Booting normal."
+    exit 0
+fi
+
+# Создаем структуру папок
+mkdir -p $UPPER_DIR $WORK_DIR
+
+# 5. Магия OverlayFS
+# Перемещаем текущий RO корень в сторону
+mount --move ${rootmnt} $RO_MOUNT
+
+# Монтируем оверлей на место корня
+mount -t overlay overlay -o lowerdir=$RO_MOUNT,upperdir=$UPPER_DIR,workdir=$WORK_DIR ${rootmnt}
+
+# 6. Пробрасываем реальные разделы внутрь новой системы
+# Чтобы система видела "настоящий" RO корень и "настоящий" Data
+mkdir -p ${rootmnt}/mnt/root-ro
+mkdir -p ${rootmnt}/data
+
+mount --move $RO_MOUNT ${rootmnt}/mnt/root-ro
+mount --move $RW_MOUNT ${rootmnt}/data
+
+exit 0

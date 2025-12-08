@@ -1,5 +1,5 @@
 ACTIVE_CONSOLES="/dev/tty[1-6]"
 CHARMAP="UTF-8"
-CODESET="CyrSlav"
+CODESET="Guess"
 FONTFACE="Terminus"
 FONTSIZE="16x32"
