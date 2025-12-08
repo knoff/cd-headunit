@@ -1,6 +1,5 @@
 #!/bin/sh
 
-# Стандартный заголовок initramfs
 PREREQ=""
 prereqs()
 {
@@ -16,19 +15,16 @@ esac
 
 . /scripts/functions
 
-# 1. Загружаем модуль (на всякий случай)
+# 1. Загрузка модуля
 modprobe overlay
 
 # Ждем диски
 wait_for_udev 10
 
-# 2. Ищем раздел DATA
-# Сначала пробуем по метке
+# 2. Поиск раздела DATA (Для проброса, но НЕ для оверлея)
 DATA_DEV="/dev/disk/by-label/data"
 
 if [ ! -e "$DATA_DEV" ]; then
-    # Если метки нет, ищем по аналогии с корнем
-    # Читаем cmdline, чтобы найти текущий root
     for x in $(cat /proc/cmdline); do
         case $x in
         root=PARTUUID=*)
@@ -41,60 +37,54 @@ if [ ! -e "$DATA_DEV" ]; then
         esac
     done
 
-    # Разрешаем симлинк
-    if [ -L "$ROOT_DEV" ]; then
-        ROOT_DEV=$(readlink -f "$ROOT_DEV")
-    fi
-
-    # Если root=/dev/mmcblk0p5, то data=/dev/mmcblk0p8
+    if [ -L "$ROOT_DEV" ]; then ROOT_DEV=$(readlink -f "$ROOT_DEV"); fi
     DISK_DEV=${ROOT_DEV%p*}
     DATA_DEV="${DISK_DEV}p8"
 fi
 
 if [ ! -e "$DATA_DEV" ]; then
-    echo "OVERLAY: Data partition not found. Booting Read-Only without persistence."
-    exit 0
+    echo "OVERLAY: Data partition not found. System might be unstable."
+    # Продолжаем, чтобы хоть как-то загрузиться
 fi
 
-# 3. Определяем слот (A/B) для изоляции данных
-CURRENT_SLOT="main"
-case "$ROOT_DEV" in
-    *p5) CURRENT_SLOT="slot_a" ;;
-    *p6) CURRENT_SLOT="slot_b" ;;
-esac
+# 3. Настройка точек монтирования
+RW_MOUNT="/mnt/data"        # Сюда монтируем физический диск Data
+RO_MOUNT="/mnt/root-ro"     # Сюда прячем системный RO раздел
+RAM_MOUNT="/mnt/ram-overlay" # Сюда монтируем RAM для записи
 
-# 4. Монтируем
-RW_MOUNT="/mnt/data"
-RO_MOUNT="/mnt/root-ro"
-OVERLAY_BASE="$RW_MOUNT/overlays/$CURRENT_SLOT"
-UPPER_DIR="$OVERLAY_BASE/upper"
-WORK_DIR="$OVERLAY_BASE/work"
+mkdir -p $RW_MOUNT $RO_MOUNT $RAM_MOUNT
 
-mkdir -p $RW_MOUNT $RO_MOUNT
+# 4. Монтируем RAM (tmpfs) для записи
+# size=50% - половина оперативки под изменения. Можно настроить.
+mount -t tmpfs -o size=50%,mode=0755 tmpfs $RAM_MOUNT
 
-# Монтируем Data (RW)
-mount -t ext4 -o noatime,commit=600 $DATA_DEV $RW_MOUNT
-if [ $? -ne 0 ]; then
-    echo "OVERLAY: Failed to mount Data. Booting normal."
-    exit 0
-fi
-
-# Создаем структуру папок
+# Создаем структуру папок в памяти
+UPPER_DIR="$RAM_MOUNT/upper"
+WORK_DIR="$RAM_MOUNT/work"
 mkdir -p $UPPER_DIR $WORK_DIR
 
-# 5. Магия OverlayFS
-# Перемещаем текущий RO корень в сторону
+# 5. Монтируем Data (Только для доступа к /data, мимо оверлея)
+if [ -e "$DATA_DEV" ]; then
+    mount -t ext4 -o noatime,commit=600 $DATA_DEV $RW_MOUNT
+fi
+
+# 6. Собираем OverlayFS
+# Перемещаем текущий корень в сторону
 mount --move ${rootmnt} $RO_MOUNT
 
-# Монтируем оверлей на место корня
+# Монтируем оверлей:
+# lower = RO диск
+# upper = RAM
 mount -t overlay overlay -o lowerdir=$RO_MOUNT,upperdir=$UPPER_DIR,workdir=$WORK_DIR ${rootmnt}
 
-# 6. Пробрасываем реальные разделы внутрь новой системы
-# Чтобы система видела "настоящий" RO корень и "настоящий" Data
+# 7. Пробрасываем разделы внутрь новой системы
 mkdir -p ${rootmnt}/mnt/root-ro
 mkdir -p ${rootmnt}/data
 
 mount --move $RO_MOUNT ${rootmnt}/mnt/root-ro
-mount --move $RW_MOUNT ${rootmnt}/data
+# Если Data была смонтирована, переносим её в /data внутри системы
+if mountpoint -q $RW_MOUNT; then
+    mount --move $RW_MOUNT ${rootmnt}/data
+fi
 
 exit 0
