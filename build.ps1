@@ -13,7 +13,7 @@ param(
 
     # Testing Parameters
     [switch]$TestsSkip,       # Пропустить тесты (только для OS Layer)
-    [string]$Test = $null     # Режим "Только тестирование"
+    [string]$Test = $null     # Режим "Только тестирование": 'unit', 'current' или путь к img
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,12 +72,10 @@ function Run-ImageTests {
 
 function Run-AppTests {
     # Заглушка для тестов приложений (Python/JS)
-    # В будущем здесь будет: docker run ... pytest src/
     Write-Host "`n>>> [APP] Running Application Tests..." -ForegroundColor Magenta
 
     if (Test-Path "src/tests") {
         Write-Host " -> Found tests. Executing..." -ForegroundColor Gray
-        # Тут будет реальный вызов
         Start-Sleep -Seconds 1
     } else {
         Write-Warning " -> No application tests found in src/tests (Skipping)"
@@ -106,12 +104,22 @@ try {
     $TargetFileName = "builder/output/headunit-${SafeVersion}-${Mode}.img"
 
     # Сборка базового контейнера (нужен всегда, даже для тестов)
-    Write-Host ">>> [INIT] Preparing Builder Environment..." -ForegroundColor Gray
+    # Используем -q для тишины, если это просто прогон тестов
+    if (-not $Test) { Write-Host ">>> [INIT] Preparing Builder Environment..." -ForegroundColor Gray }
     docker build -t $ImageName -f builder/Dockerfile . | Out-Null
 
     # --- РЕЖИМ: ТОЛЬКО ТЕСТЫ (-Test) ---
     if ($Test) {
-        if ($Test -eq "current") { $Tgt = $TargetFileName }
+        if ($Test -eq "unit") {
+            Write-Host ">>> [TEST] Running Unit Tests Only..." -ForegroundColor Cyan
+            docker run --rm -v "${PWD}:/workspace" $ImageName `
+                    /bin/bash /workspace/builder/lib/test_runner.sh --mode unit
+
+            if ($LASTEXITCODE -ne 0) { throw "Unit Tests Failed!" }
+            Write-Host ">>> [TEST] All Unit Tests Passed." -ForegroundColor Green
+            exit 0
+        }
+        elseif ($Test -eq "current") { $Tgt = $TargetFileName }
         elseif ($Test -match "\.img$") { $Tgt = $Test }
         else { $Tgt = "builder/output/headunit-${Test}-${Mode}.img" }
 
