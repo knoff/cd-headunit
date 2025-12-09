@@ -1,5 +1,8 @@
 #!/usr/bin/env bats
 
+# Загружаем общую логику (check_optional)
+load "test_helper"
+
 @test "Services: D-Bus is active" {
     run systemctl is-active dbus
     [ "$status" -eq 0 ]
@@ -28,10 +31,6 @@
     fi
 }
 
-@test "Services: Docker is ready" {
-    # Пока пропускаем, как договаривались
-    skip "Docker implementation pending"
-
-    run systemctl is-active docker
-    [ "$status" -eq 0 ]
+@test "Services [WARN]: Docker is active" {
+    check_optional "Docker service not running or missing" systemctl is-active docker
 }

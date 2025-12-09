@@ -54,6 +54,8 @@ mkdir -p /mnt/dst/opt/headunit/tests/runtime
 if [ -d "$WORKSPACE_DIR/system/tests/runtime" ]; then
     # Копируем только .sh файлы, чтобы не тянуть мусор
     cp -v "$WORKSPACE_DIR/system/tests/runtime/"*.bats /mnt/dst/opt/headunit/tests/runtime/ 2>/dev/null || true
+    cp -v "$WORKSPACE_DIR/system/tests/runtime/"*.bash /mnt/dst/opt/headunit/tests/runtime/ 2>/dev/null || true
+
     chmod +x /mnt/dst/opt/headunit/tests/runtime/*.bats 2>/dev/null || true
 else
     log_warn "Runtime tests directory not found. Skipping."
