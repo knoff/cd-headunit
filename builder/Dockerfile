@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
 # Установка зависимостей для работы с образами и файловыми системами
-# Добавляем --no-install-recommends для минимизации размера
+# Добавляем bats для тестов
 RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
   gawk \
@@ -19,10 +19,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   qemu-user-static \
   binfmt-support \
   libarchive-tools \
+  bats \
   && rm -rf /var/lib/apt/lists/*
 
 # Рабочая директория
 WORKDIR /workspace
 
-# По умолчанию запускаем bash (чтобы контейнер не закрывался мгновенно, если запущен интерактивно)
+# По умолчанию запускаем bash
 CMD ["/bin/bash"]
