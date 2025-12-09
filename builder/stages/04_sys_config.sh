@@ -26,9 +26,39 @@ cp -v "$WORKSPACE_DIR/system/scripts/overlay-init" /mnt/dst/tmp/overlay_script/o
 if command -v dos2unix >/dev/null 2>&1; then
     dos2unix /mnt/dst/tmp/overlay_script/overlay
 else
-    # Fallback если dos2unix нет на хосте, используем sed
     sed -i 's/\r$//' /mnt/dst/tmp/overlay_script/overlay
 fi
+
+# === HEALTH AGENT & TESTS ===
+log_info "Installing Health Agent & Runtime Tests..."
+# Копируем агента
+mkdir -p /mnt/dst/usr/local/bin
+
+# === УСТАНОВКА BATS (Testing Framework) ===
+log_info "Installing BATS Core..."
+# Клонируем и ставим (самый надежный способ для embedded, чтобы не тянуть лишние зависимости apt)
+git clone https://github.com/bats-core/bats-core.git /tmp/bats
+/tmp/bats/install.sh /mnt/dst/usr/local
+rm -rf /tmp/bats
+
+# Проверка (на всякий случай)
+if [ ! -x "/mnt/dst/usr/local/bin/bats" ]; then
+    die "BATS installation failed!"
+fi
+
+cp -v "$WORKSPACE_DIR/system/bin/health_agent.py" /mnt/dst/usr/local/bin/health_agent
+chmod +x /mnt/dst/usr/local/bin/health_agent
+
+# Копируем тесты
+mkdir -p /mnt/dst/opt/headunit/tests/runtime
+if [ -d "$WORKSPACE_DIR/system/tests/runtime" ]; then
+    # Копируем только .sh файлы, чтобы не тянуть мусор
+    cp -v "$WORKSPACE_DIR/system/tests/runtime/"*.bats /mnt/dst/opt/headunit/tests/runtime/ 2>/dev/null || true
+    chmod +x /mnt/dst/opt/headunit/tests/runtime/*.bats 2>/dev/null || true
+else
+    log_warn "Runtime tests directory not found. Skipping."
+fi
+# ========================================
 
 # 3. Data папки
 mkdir -p /mnt/dst/data/app
@@ -41,13 +71,10 @@ export BUILD_VERSION BUILD_MODE
 
 cat <<EOF | chroot /mnt/dst /bin/bash
 set -e
-
-# Отключаем интерактивность для чистого лога
 export DEBIAN_FRONTEND=noninteractive
 
 # === БЛОК 1: УПРАВЛЕНИЕ ПАКЕТАМИ ===
 echo ">>> Managing Packages..."
-
 apt-get update
 
 # Удаление лишнего
@@ -55,7 +82,7 @@ apt-get remove -y userconf-pi cloud-init dphys-swapfile || true
 rm -rf /usr/lib/userconf-pi /etc/cloud /var/lib/cloud /var/swap
 
 # Установка зависимостей
-# ВАЖНО: fonts-terminus обеспечивает шрифт, Uni2 требует console-setup
+# Добавляем python3 для работы агента (обычно он есть, но для надежности)
 echo "Installing dependencies..."
 apt-get install -y --no-install-recommends \
     initramfs-tools \
@@ -67,13 +94,13 @@ apt-get install -y --no-install-recommends \
     fonts-terminus \
     kbd \
     busybox-static \
-    bc
+    bc \
+    python3 \
+    python3-minimal
 
-# Очистка
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 
-# Отключение сервисов
 systemctl disable apt-daily.timer apt-daily-upgrade.timer man-db.timer
 systemctl mask rpi-resize.service systemd-growfs-root.service rpi-resize-swap-file.service
 
@@ -116,8 +143,6 @@ LOCALEEOF
 locale-gen
 update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 
-# Console Setup
-# ИСПРАВЛЕНИЕ: Uni2 вместо Guess. Uni2 = Universal (Latin + Cyrillic).
 cat > /etc/default/console-setup <<FONTEOF
 ACTIVE_CONSOLES="/dev/tty[1-6]"
 CHARMAP="UTF-8"
@@ -125,9 +150,6 @@ CODESET="Uni2"
 FONTFACE="Terminus"
 FONTSIZE="16x32"
 FONTEOF
-
-# Применяем настройки
-# --save-only сгенерирует файлы в /etc/console-setup
 setupcon --save-only
 
 # --- D. USER & NETWORK ---
@@ -221,6 +243,10 @@ cat > /opt/headunit/version.json <<JSONEOF
 JSONEOF
 
 echo "Welcome to HeadUnit OS $BUILD_VERSION" > /etc/motd
+
+# --- G. HEALTH CHECK SERVICE ---
+# Создаем systemd юнит для запуска тестов при старте (опционально, если нужно)
+# Пока просто оставляем бинарник доступным для ручного запуска или через deploy.ps1
 
 EOF
 
