@@ -174,6 +174,7 @@ if [ "$SYS_ENABLE_SSH" == "yes" ]; then
     fi
 fi
 
+# Настройка NetworkManager
 systemctl enable NetworkManager
 systemctl disable wpa_supplicant
 systemctl stop wpa_supplicant || true
@@ -181,38 +182,84 @@ rm -f /var/lib/NetworkManager/NetworkManager.state
 systemctl enable rfkill-unblock.service
 systemctl unmask systemd-rfkill.service || true
 
+# Глобальная настройка WiFi (Country Code)
 if [ -n "$NET_WIFI_COUNTRY" ]; then
     mkdir -p /etc/wpa_supplicant
     echo "country=$NET_WIFI_COUNTRY" > /etc/wpa_supplicant/wpa_supplicant.conf
 fi
 
+mkdir -p /etc/NetworkManager/system-connections
+chmod 700 /etc/NetworkManager/system-connections
+
+# 1. External WiFi (Client) -> wlan1
 if [ -n "$NET_WIFI_SSID" ]; then
-    mkdir -p /etc/NetworkManager/system-connections
-    chmod 700 /etc/NetworkManager/system-connections
-    UUID_WIFI=\$(cat /proc/sys/kernel/random/uuid)
+    echo "Configuring External Client (wlan1)..."
+    UUID_CLIENT=\$(cat /proc/sys/kernel/random/uuid)
     cat > "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection" <<NMEOF
 [connection]
 id=preconfigured-wifi
-uuid=\$UUID_WIFI
+uuid=\$UUID_CLIENT
 type=wifi
 interface-name=wlan1
 autoconnect=true
 autoconnect-priority=100
+
 [wifi]
 mode=infrastructure
 ssid=$NET_WIFI_SSID
+
 [wifi-security]
 key-mgmt=wpa-psk
 psk=$NET_WIFI_PASS
+
 [ipv4]
 method=auto
+
 [ipv6]
 addr-gen-mode=default
 method=auto
 NMEOF
     chmod 600 "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
-    chown root:root "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
 fi
+
+# 2. Internal WiFi (AP) -> wlan0
+if [ -n "$NET_AP_SSID" ]; then
+    echo "Configuring Internal AP (wlan0)..."
+    UUID_AP=\$(cat /proc/sys/kernel/random/uuid)
+
+    # NetworkManager требует формат IP без маски в address1, если используется старый стиль,
+    # но в keyfile формате address1=192.168.50.1/24 работает корректно.
+
+    cat > "/etc/NetworkManager/system-connections/internal-ap.nmconnection" <<NMEOF
+[connection]
+id=internal-ap
+uuid=\$UUID_AP
+type=wifi
+interface-name=wlan0
+autoconnect=true
+
+[wifi]
+mode=ap
+ssid=$NET_AP_SSID
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=$NET_AP_PASS
+
+[ipv4]
+# method=shared включает DHCP сервер и NAT
+method=shared
+address1=$NET_AP_IP
+
+[ipv6]
+addr-gen-mode=default
+method=ignore
+NMEOF
+    chmod 600 "/etc/NetworkManager/system-connections/internal-ap.nmconnection"
+fi
+
+# Исправление прав (на всякий случай массово)
+chown root:root /etc/NetworkManager/system-connections/*.nmconnection
 
 # --- E. DOCKER LOGS ---
 mkdir -p /etc/docker
