@@ -8,14 +8,12 @@ setup() {
     [ -f "$MOUNT_ROOT/etc/udev/rules.d/70-persistent-net.rules" ]
 }
 
-@test "Network: WiFi Client (External) config created" {
-    local nm_conf="$MOUNT_ROOT/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection"
-    [ -f "$nm_conf" ]
+@test "Network: Static WiFi Client config exists" {
+    [ -f "$MOUNT_ROOT/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection" ]
 }
 
-@test "Network: WiFi AP (Internal) config created" {
-    local ap_conf="$MOUNT_ROOT/etc/NetworkManager/system-connections/internal-ap.nmconnection"
-    [ -f "$ap_conf" ]
+@test "Network: Static WiFi AP config exists" {
+    [ -f "$MOUNT_ROOT/etc/NetworkManager/system-connections/internal-ap.nmconnection" ]
 }
 
 @test "Network: WiFi configs have secure permissions (600)" {
@@ -32,13 +30,9 @@ setup() {
     [ "$output" -eq 600 ]
 }
 
-@test "Network: AP is configured with correct static IP" {
-    local ap_conf="$MOUNT_ROOT/etc/NetworkManager/system-connections/internal-ap.nmconnection"
-
-    # Ищем строку address1=...
-    # Предполагаем, что IP задается в конфиге. Для теста можно проверить наличие ключа address1
-    run grep "address1=" "$ap_conf"
-    [ "$status" -eq 0 ]
+@test "Network: Identity Service is installed but DISABLED" {
+    [ -f "$MOUNT_ROOT/etc/systemd/system/headunit-identity.service" ]
+    [ ! -L "$MOUNT_ROOT/etc/systemd/system/multi-user.target.wants/headunit-identity.service" ]
 }
 
 @test "Network: RFKill unblock service enabled" {

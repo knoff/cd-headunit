@@ -16,6 +16,7 @@ log_info "Injecting configurations..."
 cp -v "$WORKSPACE_DIR/system/udev/70-persistent-net.rules" /mnt/dst/etc/udev/rules.d/
 cp -v "$WORKSPACE_DIR/system/udev/99-hide-partitions.rules" /mnt/dst/etc/udev/rules.d/
 cp -v "$WORKSPACE_DIR/system/systemd/rfkill-unblock.service" /mnt/dst/etc/systemd/system/
+cp -v "$WORKSPACE_DIR/system/systemd/headunit-identity.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
 # console-setup не копируем, создадим его с нуля ниже с правильным CODESET
 
@@ -29,10 +30,37 @@ else
     sed -i 's/\r$//' /mnt/dst/tmp/overlay_script/overlay
 fi
 
-# === HEALTH AGENT & TESTS ===
-log_info "Installing Health Agent & Runtime Tests..."
-# Копируем агента
+# === CONFIGURATION & DEFAULTS ===
+log_info "Generating Factory Defaults..."
+mkdir -p /mnt/dst/etc/headunit
+
+# 1. Генерируем дефолты из переменных сборки
+# Используем NET_AP_SSID как Serial по умолчанию, если он не задан отдельно
+cat > /mnt/dst/etc/headunit/factory_defaults.json <<JSONEOF
+{
+  "serial": "${NET_AP_SSID:-CDR-00000000}",
+  "wifi_ap_pass": "${NET_AP_PASS}",
+  "wifi_client_ssid": "${NET_WIFI_SSID}",
+  "wifi_client_pass": "${NET_WIFI_PASS}",
+  "wifi_country": "${NET_WIFI_COUNTRY:-RU}"
+}
+JSONEOF
+chmod 644 /mnt/dst/etc/headunit/factory_defaults.json
+
+# 2. Устанавливаем библиотеку конфигурации
+log_info "Installing Shared Libraries..."
+cp -v "$WORKSPACE_DIR/system/lib/hu_config.py" /mnt/dst/usr/lib/python3/dist-packages/hu_config.py
+chmod 644 /mnt/dst/usr/lib/python3/dist-packages/hu_config.py
+
+# 3. Устанавливаем инструменты настройки
+log_info "Installing System Tools..."
 mkdir -p /mnt/dst/usr/local/bin
+
+cp -v "$WORKSPACE_DIR/system/bin/headunit-config.py" /mnt/dst/usr/local/bin/headunit-config
+chmod +x /mnt/dst/usr/local/bin/headunit-config
+
+cp -v "$WORKSPACE_DIR/system/bin/headunit-apply-config.py" /mnt/dst/usr/local/bin/headunit-apply-config
+chmod +x /mnt/dst/usr/local/bin/headunit-apply-config
 
 # === УСТАНОВКА BATS (Testing Framework) ===
 log_info "Installing BATS Core..."
@@ -46,8 +74,10 @@ if [ ! -x "/mnt/dst/usr/local/bin/bats" ]; then
     die "BATS installation failed!"
 fi
 
-cp -v "$WORKSPACE_DIR/system/bin/health_agent.py" /mnt/dst/usr/local/bin/health_agent
-chmod +x /mnt/dst/usr/local/bin/health_agent
+# Health Agent
+log_info "Installing Health Agent..."
+cp -v "$WORKSPACE_DIR/system/bin/health-agent.py" /mnt/dst/usr/local/bin/health-agent
+chmod +x /mnt/dst/usr/local/bin/health-agent
 
 # Копируем тесты
 mkdir -p /mnt/dst/opt/headunit/tests/runtime
@@ -68,8 +98,10 @@ mkdir -p /mnt/dst/data/configs
 mkdir -p /mnt/dst/data/db
 
 # 4. CHROOT
-export SYS_ENABLE_SSH SYS_USER SYS_PASS NET_HOSTNAME NET_WIFI_SSID NET_WIFI_PASS NET_WIFI_COUNTRY
-export BUILD_VERSION BUILD_MODE
+export SYS_ENABLE_SSH SYS_USER SYS_PASS NET_HOSTNAME NET_WIFI_COUNTRY
+export NET_WIFI_SSID NET_WIFI_PASS
+export NET_AP_SSID NET_AP_PASS NET_AP_IP
+export BUILD_VERSION BUILD_MODE SERIAL
 
 cat <<EOF | chroot /mnt/dst /bin/bash
 set -e
@@ -193,7 +225,7 @@ chmod 700 /etc/NetworkManager/system-connections
 
 # 1. External WiFi (Client) -> wlan1
 if [ -n "$NET_WIFI_SSID" ]; then
-    echo "Configuring External Client (wlan1)..."
+    echo "Creating Static Client Config..."
     UUID_CLIENT=\$(cat /proc/sys/kernel/random/uuid)
     cat > "/etc/NetworkManager/system-connections/preconfigured-wifi.nmconnection" <<NMEOF
 [connection]
@@ -224,12 +256,8 @@ fi
 
 # 2. Internal WiFi (AP) -> wlan0
 if [ -n "$NET_AP_SSID" ]; then
-    echo "Configuring Internal AP (wlan0)..."
+    echo "Creating Static AP Config..."
     UUID_AP=\$(cat /proc/sys/kernel/random/uuid)
-
-    # NetworkManager требует формат IP без маски в address1, если используется старый стиль,
-    # но в keyfile формате address1=192.168.50.1/24 работает корректно.
-
     cat > "/etc/NetworkManager/system-connections/internal-ap.nmconnection" <<NMEOF
 [connection]
 id=internal-ap
@@ -247,7 +275,6 @@ key-mgmt=wpa-psk
 psk=$NET_AP_PASS
 
 [ipv4]
-# method=shared включает DHCP сервер и NAT
 method=shared
 address1=$NET_AP_IP
 

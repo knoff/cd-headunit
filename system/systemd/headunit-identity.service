@@ -1,0 +1,18 @@
+[Unit]
+Description=HeadUnit Identity & Configuration Applier
+# Запускаемся после того, как файловые системы смонтированы (нам нужен /data)
+After=local-fs.target
+# Запускаемся после NetworkManager, так как используем nmcli
+After=NetworkManager.service
+Requires=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/headunit-apply-config
+# Считаем сервис активным после выполнения (чтобы другие могли зависеть от него)
+RemainAfterExit=yes
+# Не фейлим загрузку, если скрипт упал (например, конфиг битый)
+FailureAction=none
+
+[Install]
+WantedBy=multi-user.target
