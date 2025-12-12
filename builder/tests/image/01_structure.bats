@@ -22,14 +22,23 @@ setup() {
     [ -d "$MOUNT_ROOT/data" ]
 }
 
+@test "Infra: Config Library is installed" {
+    [ -f "$MOUNT_ROOT/usr/lib/python3/dist-packages/hu_config.py" ]
+}
+
 @test "Infra: Health Agent is installed and executable" {
     # Проверяем наличие бинарника (без .py, так как мы его переименовали при копировании)
-    [ -f "$MOUNT_ROOT/usr/local/bin/health_agent" ]
+    [ -f "$MOUNT_ROOT/usr/local/bin/health-agent" ]
 }
 
 @test "Infra: Health Agent has execution permissions" {
-    [ -x "$MOUNT_ROOT/usr/local/bin/health_agent" ]
+    [ -x "$MOUNT_ROOT/usr/local/bin/health-agent" ]
 }
+
+@test "Infra: Config Wizard is installed" {
+    [ -f "$MOUNT_ROOT/usr/local/bin/headunit-config" ]
+}
+
 
 @test "Infra: Runtime tests directory is populated" {
     # Проверяем, что папка есть и она не пустая
