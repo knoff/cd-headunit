@@ -52,6 +52,31 @@ log_info "Installing Shared Libraries..."
 cp -v "$WORKSPACE_DIR/system/lib/hu_config.py" /mnt/dst/usr/lib/python3/dist-packages/hu_config.py
 chmod 644 /mnt/dst/usr/lib/python3/dist-packages/hu_config.py
 
+# === INTEGRATION: CD-PROTOCOL ===
+log_info "Installing cd-protocol (Python bindings)..."
+
+PROTO_SRC_ROOT="$WORKSPACE_DIR/external/cd-protocol/src/python"
+PY_DIST_DIR="/mnt/dst/usr/lib/python3/dist-packages"
+
+if [ -d "$PROTO_SRC_ROOT" ]; then
+    # Копируем папку пакета целиком
+    cp -v -r "$PROTO_SRC_ROOT"/* "$PY_DIST_DIR/" || log_warn "No files found in $PROTO_SRC_ROOT to copy"
+
+    # Гарантируем права доступа (чтобы любой пользователь мог импортировать)
+    # Ищем только скопированные файлы/папки, но для простоты пройдемся по target dir (аккуратно)
+    # Лучше выставить права конкретно на то, что мы ожидаем (пакет cd_protocol)
+    if [ -d "$PY_DIST_DIR/cd_protocol" ]; then
+        find "$PY_DIST_DIR/cd_protocol" -type d -exec chmod 755 {} \;
+        find "$PY_DIST_DIR/cd_protocol" -type f -exec chmod 644 {} \;
+    fi
+
+    log_info "cd-protocol installed successfully."
+else
+    log_warn "⚠️  cd-protocol source NOT FOUND at $PROTO_SRC_DIR"
+    log_warn "Did you forget 'git submodule update --init --recursive'?"
+fi
+# ======================================
+
 # 3. Устанавливаем инструменты настройки
 log_info "Installing System Tools..."
 mkdir -p /mnt/dst/usr/local/bin

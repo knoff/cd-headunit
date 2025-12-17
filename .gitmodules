@@ -1,0 +1,3 @@
+[submodule "external/cd-protocol"]
+	path = external/cd-protocol
+	url = https://github.com/knoff/cd-protocol.git
