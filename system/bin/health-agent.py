@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-HeadUnit Health Agent v2
-Группирует тесты по файлам и фильтрует технический шум BATS.
+HeadUnit Health Agent v3 (Multi-Layer)
+Запускает диагностику по уровням: System -> Services -> App.
+Использует BATS тесты из активных компонентов.
 """
 
 import sys
@@ -9,7 +10,27 @@ import subprocess
 import shutil
 import os
 
-TESTS_DIR = "/opt/headunit/tests/runtime"
+# Определение слоев тестирования
+# (Название, Путь, Обязательность)
+TEST_LAYERS = [
+    {
+        "name": "SYSTEM KERNEL & DRIVERS",
+        "path": "/opt/headunit/tests/runtime",
+        "required": True,
+    },
+    {
+        "name": "SERVICES & INFRASTRUCTURE",
+        # Ссылка, созданная boot-linker'ом на активную версию
+        "path": "/run/headunit/active_services/tests",
+        "required": False,
+    },
+    {
+        "name": "APPLICATION LOGIC",
+        # Ссылка на активную версию приложения
+        "path": "/run/headunit/active_app/tests",
+        "required": False,
+    },
+]
 
 
 class Colors:
@@ -20,6 +41,7 @@ class Colors:
     YELLOW = "\033[93m"
     RED = "\033[91m"
     GREY = "\033[90m"
+    BOLD = "\033[1m"
     RESET = "\033[0m"
 
 
@@ -29,8 +51,7 @@ def run_test_file(bats_path, filepath):
     Возвращает кортеж (passed, warnings, failed)
     """
     filename = os.path.basename(filepath)
-    # Печатаем заголовок модуля
-    print(f"\n{Colors.CYAN}📦 [{filename}]{Colors.RESET}")
+    print(f"  {Colors.CYAN}📦 [{filename}]{Colors.RESET}")
 
     cmd = [bats_path, "--tap", filepath]
 
@@ -46,99 +67,107 @@ def run_test_file(bats_path, filepath):
         for line in process.stdout:
             line = line.strip()
 
-            # Игнорируем технические заголовки TAP
             if line.startswith("1..") or not line:
                 continue
 
             if line.startswith("ok"):
-                # Обработка PASS и WARN (через skip)
-                description = line.split(" ", 2)[-1]  # Убираем 'ok <num>'
-
+                description = line.split(" ", 2)[-1]
                 if "# skip" in line:
                     if "WARN:" in line:
-                        # Формат: ... # skip WARN: Reason
                         parts = line.split("# skip WARN:", 1)
-                        # Чистим имя теста от мусора
                         test_name = parts[0].replace("-", "").strip()
                         reason = parts[1].strip()
-
-                        print(f"  {Colors.YELLOW}⚠ WARN{Colors.RESET} {test_name}")
-                        print(f"       └─ {reason}")
+                        print(f"    {Colors.YELLOW}⚠ WARN{Colors.RESET} {test_name}")
+                        print(f"         └─ {reason}")
                         warnings += 1
                     else:
-                        # Обычный skip
-                        print(f"  {Colors.BLUE}SKIP{Colors.RESET} {description}")
+                        print(f"    {Colors.BLUE}SKIP{Colors.RESET} {description}")
                 else:
-                    # Чистый PASS
                     clean_desc = (
                         description.split("-", 1)[-1].strip()
                         if "-" in description
                         else description
                     )
-                    print(f"  {Colors.GREEN}✔ PASS{Colors.RESET} {clean_desc}")
+                    print(f"    {Colors.GREEN}✔ PASS{Colors.RESET} {clean_desc}")
                     passed += 1
 
             elif line.startswith("not ok"):
                 failed += 1
-                # Убираем 'not ok <num>'
                 description = line.split(" ", 2)[-1]
-                print(f"  {Colors.RED}✖ FAIL{Colors.RESET} {description}")
-
-            elif line.startswith("#"):
-                # ФИЛЬТРАЦИЯ ШУМА
-                # BATS пишет отладочную инфу через #.
-                # Мы игнорируем всё, кроме явных сообщений, которые мы можем захотеть (опционально)
-                # Если вы хотите видеть вывод echo внутри тестов, можно добавить логику.
-                # Сейчас мы просто скрываем весь шум:
-                continue
+                print(f"    {Colors.RED}✖ FAIL{Colors.RESET} {description}")
 
         process.wait()
         return passed, warnings, failed
 
     except Exception as e:
-        print(f"{Colors.RED}  Execution Error: {e}{Colors.RESET}")
+        print(f"    {Colors.RED}Execution Error: {e}{Colors.RESET}")
         return 0, 0, 1
 
 
-def main():
-    print(f"{Colors.HEADER}>>> HeadUnit Health Check System{Colors.RESET}")
-    print(f"Target: {TESTS_DIR}")
+def process_layer(layer, bats_path):
+    """Обрабатывает один слой тестов"""
+    name = layer["name"]
+    path = layer["path"]
+    required = layer["required"]
 
-    bats_path = shutil.which("bats")
-    if not bats_path:
-        print(f"{Colors.RED}[CRITICAL] 'bats' not found!{Colors.RESET}")
-        sys.exit(1)
+    print(f"\n{Colors.BOLD}=== LAYER: {name} ==={Colors.RESET}")
 
-    if not os.path.isdir(TESTS_DIR):
-        print(f"{Colors.RED}[ERROR] Directory not found.{Colors.RESET}")
-        sys.exit(1)
+    if not os.path.exists(path):
+        if required:
+            print(
+                f"{Colors.RED}[CRITICAL] Test directory missing: {path}{Colors.RESET}"
+            )
+            return 0, 0, 1  # Critical failure
+        else:
+            print(
+                f"{Colors.GREY}[INFO] No tests found (path does not exist).{Colors.RESET}"
+            )
+            return 0, 0, 0
 
-    # Ищем все .bats файлы
     files = sorted(
-        [
-            os.path.join(TESTS_DIR, f)
-            for f in os.listdir(TESTS_DIR)
-            if f.endswith(".bats")
-        ]
+        [os.path.join(path, f) for f in os.listdir(path) if f.endswith(".bats")]
     )
 
     if not files:
-        print(f"{Colors.YELLOW}No tests found.{Colors.RESET}")
-        sys.exit(0)
+        print(f"{Colors.GREY}[INFO] Directory empty.{Colors.RESET}")
+        return 0, 0, 0
+
+    l_pass = 0
+    l_warn = 0
+    l_fail = 0
+
+    for f in files:
+        p, w, f_cnt = run_test_file(bats_path, f)
+        l_pass += p
+        l_warn += w
+        l_fail += f_cnt
+
+    return l_pass, l_warn, l_fail
+
+
+def main():
+    print(f"{Colors.HEADER}>>> HeadUnit Health Check System v3{Colors.RESET}")
+
+    bats_path = shutil.which("bats")
+    if not bats_path:
+        print(f"{Colors.RED}[CRITICAL] 'bats' utility not found!{Colors.RESET}")
+        sys.exit(1)
 
     total_pass = 0
     total_warn = 0
     total_fail = 0
 
-    # Запускаем пофайлово
-    for f in files:
-        p, w, f_count = run_test_file(bats_path, f)
+    for layer in TEST_LAYERS:
+        p, w, f = process_layer(layer, bats_path)
         total_pass += p
         total_warn += w
-        total_fail += f_count
+        total_fail += f
 
-    print("\n" + "═" * 40)
-    print(f"Summary: {total_pass} Passed, {total_warn} Warnings, {total_fail} Failed")
+    print("\n" + "═" * 50)
+    summary_line = (
+        f"Total: {total_pass} Passed, {total_warn} Warnings, {total_fail} Failed"
+    )
+    print(summary_line)
 
     if total_fail > 0:
         print(f"{Colors.RED}✘ SYSTEM ISSUES DETECTED{Colors.RESET}")

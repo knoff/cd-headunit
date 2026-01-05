@@ -1,0 +1,74 @@
+#!/bin/bash
+# Скрипт расширения раздела DATA (p8) до конца диска
+# Запускается systemd-сервисом при загрузке
+
+TARGET_DEV="/dev/mmcblk0"
+PART_DATA="8"
+PART_EXTENDED="2"
+PART_DEV="${TARGET_DEV}p${PART_DATA}"
+MARKER_FILE="/data/.resized"
+
+# Проверка на права суперпользователя
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Error: script requires root privileges"
+    exit 1
+fi
+
+if [ -f "$MARKER_FILE" ]; then
+    echo "Data partition already resized (marker found)."
+    exit 0
+fi
+
+echo "Starting partition expansion process on ${TARGET_DEV}..."
+
+# --- ШАГ 1: Расширение Extended Partition (p2) ---
+# Это контейнер для логических разделов. Его нужно растянуть первым.
+if command -v growpart >/dev/null; then
+    echo "Attempting to expand Extended Partition (${PART_EXTENDED})..."
+    # growpart вернет 0 если изменил, 1 если места нет (уже макс), 2 если ошибка
+    OUT=$(growpart "$TARGET_DEV" "$PART_EXTENDED")
+    RET=$?
+
+    if [ $RET -eq 0 ]; then
+        echo "Extended partition resized. Output: $OUT"
+        partprobe "$TARGET_DEV" || true
+        sleep 1
+    elif [ $RET -eq 1 ]; then
+        echo "Extended partition already at max size."
+    else
+        echo "WARNING: Failed to resize Extended partition (Code $RET). Proceeding anyway..."
+    fi
+
+    # --- ШАГ 2: Расширение Data Partition (p8) ---
+    echo "Attempting to expand Data Partition (${PART_DATA})..."
+    OUT=$(growpart "$TARGET_DEV" "$PART_DATA")
+    RET=$?
+
+    if [ $RET -eq 0 ]; then
+        echo "Partition table resized for p${PART_DATA}. Output: $OUT"
+        partprobe "$TARGET_DEV" || true
+    elif [ $RET -eq 1 ]; then
+        echo "Data partition already at max size."
+    else
+        echo "ERROR: growpart failed for p${PART_DATA} with code $RET"
+        exit 1
+    fi
+else
+    echo "ERROR: growpart utility not found! (cloud-guest-utils missing?)"
+    exit 1
+fi
+
+# --- ШАГ 3: Расширение файловой системы ---
+echo "Resizing filesystem on ${PART_DEV}..."
+resize2fs "$PART_DEV"
+RET=$?
+
+if [ $RET -eq 0 ]; then
+    echo "Filesystem resized successfully."
+    touch "$MARKER_FILE"
+else
+    echo "ERROR: resize2fs failed with code $RET"
+    exit 1
+fi
+
+exit 0

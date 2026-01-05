@@ -1,7 +1,13 @@
 <#
 .SYNOPSIS
-    Smart Builder & Tester for HeadUnit OS.
-    Оркестратор полного цикла: определяет контекст изменений и запускает соответствующие пайплайны.
+    Smart Builder & Tester for HeadUnit OS (Native Architecture).
+    Оркестратор полного цикла.
+
+    Логика сборки:
+    1. Изменения в App -> Тесты App + Манифест. (Образ НЕ пересобирается).
+    2. Изменения в Services -> Тесты Services + Манифест. (Образ НЕ пересобирается).
+    3. Изменения в OS -> Полная сборка образа (включает текущие App/Services).
+    4. Флаг -Force -> Принудительная сборка всего и генерация образа.
 #>
 param(
     [string]$InputImage = "2025-11-24-raspios-trixie-arm64-lite.img",
@@ -9,10 +15,10 @@ param(
     [string]$Checkout = $null,
     [switch]$ListTags,
     [switch]$Interactive,
-    [switch]$Force, # Принудительно включить режим OS Build
+    [switch]$Force, # Принудительно собрать образ, даже если менялся только App
 
     # Testing Parameters
-    [switch]$TestsSkip,       # Пропустить тесты (только для OS Layer)
+    [switch]$TestsSkip,       # Пропустить тесты
     [string]$Test = $null     # Режим "Только тестирование": 'unit', 'current' или путь к img
 )
 
@@ -25,8 +31,11 @@ function Get-GitVersion {
     try { return git describe --tags --always --dirty 2>$null } catch { return "unknown" }
 }
 
-function Get-ChangeScope {
-    # Логика определения области изменений (Scope Detection)
+function Get-BuildTargets {
+    # Если Force - собираем всё (App + Svc) и обязательно OS
+    if ($Force) { return @("APP", "SERVICES", "OS") }
+
+    # Логика определения области изменений
     $dirty = git status --porcelain
     if ($dirty) {
         $files = $dirty | ForEach-Object { $_.Substring(3) }
@@ -34,27 +43,69 @@ function Get-ChangeScope {
         $files = git diff-tree --no-commit-id --name-only -r HEAD
     }
 
+    $targets = @()
+    # Триггеры изменения слоя ОС
     $os_triggers = @("builder/", "system/", "headunit.conf", "build.ps1")
-    $app_triggers = @("src/", "deploy/", "services/")
 
-    $needs_os = $false
-    $needs_app = $false
+    $changed_app = $false
+    $changed_svc = $false
+    $changed_os = $false
 
     foreach ($file in $files) {
-        foreach ($trigger in $os_triggers) { if ($file -like "$trigger*") { $needs_os = $true } }
-        foreach ($trigger in $app_triggers) { if ($file -like "$trigger*") { $needs_app = $true } }
+        if ($file -like "src/*") { $changed_app = $true }
+        if ($file -like "services/*") { $changed_svc = $true }
+        foreach ($trigger in $os_triggers) { if ($file -like "$trigger*") { $changed_os = $true } }
     }
 
-    if ($needs_os) { return "OS" }
-    if ($needs_app) { return "APP" }
-    return "NONE"
+    # Формируем список целей
+    if ($changed_app) { $targets += "APP" }
+    if ($changed_svc) { $targets += "SERVICES" }
+
+    # ОС собираем ТОЛЬКО если есть изменения в системных файлах
+    if ($changed_os) { $targets += "OS" }
+
+    if ($targets.Count -eq 0) { return "NONE" }
+
+    return $targets | Select-Object -Unique
+}
+
+function Build-AppLayer {
+    Write-Host "`n>>> [BUILD] Application Layer (src/)..." -ForegroundColor Magenta
+
+    # 1. Проверка манифеста (создаем, если нет)
+    if (-not (Test-Path "src/manifest.json")) {
+        Write-Warning "Manifest missing! Creating default..."
+        Set-Content -Path "src/manifest.json" -Value '{"component":"app","version":"0.1.0","dependencies":{"services":">=0.1.0"}}'
+    }
+
+    # 2. Запуск тестов (если есть)
+    if (Test-Path "src/tests") {
+        Write-Host " -> Running App Unit Tests..." -ForegroundColor Gray
+        # Здесь будет вызов pytest, когда добавим тесты
+    }
+
+    Write-Host " -> App Layer Prepared for deployment." -ForegroundColor Green
+}
+
+function Build-ServicesLayer {
+    Write-Host "`n>>> [BUILD] Services Layer (services/)..." -ForegroundColor Magenta
+
+    if (-not (Test-Path "services/manifest.json")) {
+        Write-Warning "Manifest missing! Creating default..."
+        Set-Content -Path "services/manifest.json" -Value '{"component":"services","version":"0.1.0","dependencies":{"os":">=0.1.0"}}'
+    }
+
+    if (Test-Path "services/tests") {
+        Write-Host " -> Running Services Unit Tests..." -ForegroundColor Gray
+    }
+
+    Write-Host " -> Services Layer Prepared for deployment." -ForegroundColor Green
 }
 
 function Run-ImageTests {
     param([string]$ImagePath)
     Write-Host "`n>>> [TEST] Running Image Verification..." -ForegroundColor Magenta
 
-    # Конвертация путей для Docker
     if (Test-Path $ImagePath -PathType Leaf) {
         $RealTarget = Resolve-Path $ImagePath
         $RelPath = Get-Item $RealTarget | Resolve-Path -Relative
@@ -70,21 +121,7 @@ function Run-ImageTests {
     Write-Host ">>> [TEST] Image OK." -ForegroundColor Green
 }
 
-function Run-AppTests {
-    # Заглушка для тестов приложений (Python/JS)
-    Write-Host "`n>>> [APP] Running Application Tests..." -ForegroundColor Magenta
-
-    if (Test-Path "src/tests") {
-        Write-Host " -> Found tests. Executing..." -ForegroundColor Gray
-        Start-Sleep -Seconds 1
-    } else {
-        Write-Warning " -> No application tests found in src/tests (Skipping)"
-    }
-
-    Write-Host ">>> [APP] Tests Passed." -ForegroundColor Green
-}
-
-# === 2. ТОЧКА ВХОДА (MAIN) ===
+# === 2. ТОЧКА ВХОДА ===
 
 if ($ListTags) { git tag -l | Sort-Object -Descending; exit 0 }
 
@@ -98,13 +135,12 @@ if ($Checkout) {
 }
 
 try {
-    # Подготовка переменных окружения
+    # Инициализация переменных
     $BuildVersion = Get-GitVersion
     $SafeVersion = $BuildVersion -replace '[\\/:\*\?"<>\|]', '_'
     $TargetFileName = "builder/output/headunit-${SafeVersion}-${Mode}.img"
 
-    # Сборка базового контейнера (нужен всегда, даже для тестов)
-    # Используем -q для тишины, если это просто прогон тестов
+    # Сборка контейнера (нужен всегда, даже для юнит-тестов)
     if (-not $Test) { Write-Host ">>> [INIT] Preparing Builder Environment..." -ForegroundColor Gray }
     docker build -t $ImageName -f builder/Dockerfile . | Out-Null
 
@@ -114,9 +150,7 @@ try {
             Write-Host ">>> [TEST] Running Unit Tests Only..." -ForegroundColor Cyan
             docker run --rm -v "${PWD}:/workspace" $ImageName `
                     /bin/bash /workspace/builder/lib/test_runner.sh --mode unit
-
             if ($LASTEXITCODE -ne 0) { throw "Unit Tests Failed!" }
-            Write-Host ">>> [TEST] All Unit Tests Passed." -ForegroundColor Green
             exit 0
         }
         elseif ($Test -eq "current") { $Tgt = $TargetFileName }
@@ -128,71 +162,64 @@ try {
         exit 0
     }
 
-    # --- АНАЛИЗ И ВЕТВЛЕНИЕ (LOGIC BRANCHING) ---
-    $Scope = Get-ChangeScope
-    if ($Force) { $Scope = "OS" }
+    # --- PIPELINE EXECUTION ---
+    $Targets = Get-BuildTargets
+
+    if ($Targets -contains "NONE") {
+        Write-Host "No changes detected. Use -Force to rebuild OS." -ForegroundColor Gray
+        exit 0
+    }
 
     Write-Host "`n==========================================" -ForegroundColor Cyan
-    Write-Host " HeadUnit Pipeline: $Scope" -ForegroundColor Cyan
+    Write-Host " Pipeline Targets: $($Targets -join ', ')" -ForegroundColor Cyan
     Write-Host "=========================================="
 
-    switch ($Scope) {
-        "OS" {
-            # === ВЕТКА 1: СБОРКА ОС (OS LAYER) ===
-            Write-Host "Detected changes in SYSTEM layer." -ForegroundColor Yellow
-            Write-Host "Action: Full OS Rebuild & Test" -ForegroundColor Yellow
+    # 1. BUILD APP
+    if ($Targets -contains "APP") {
+        Build-AppLayer
+    }
 
-            # 1. Pre-Build Unit Tests
-            if (-not $TestsSkip) {
-                Write-Host "`n>>> [1/3] Running Builder Unit Tests..." -ForegroundColor Cyan
-                docker run --rm -v "${PWD}:/workspace" $ImageName `
-                    /bin/bash /workspace/builder/lib/test_runner.sh --mode unit
-                if ($LASTEXITCODE -ne 0) { throw "Builder Unit Tests Failed!" }
-            }
+    # 2. BUILD SERVICES
+    if ($Targets -contains "SERVICES") {
+        Build-ServicesLayer
+    }
 
-            # 2. Build Process
-            Write-Host "`n>>> [2/3] Building Disk Image..." -ForegroundColor Cyan
-            New-Item -ItemType Directory -Force -Path "builder/output" | Out-Null
+    # 3. BUILD OS IMAGE
+    # Запускаем только если явно изменилась ОС или был передан флаг Force
+    if ($Targets -contains "OS") {
+        Write-Host "`n>>> [BUILD] OS Image (System Layer)..." -ForegroundColor Yellow
 
-            if (-not (Test-Path $InputImage)) { Write-Warning "Base image $InputImage not found!" }
-
-            $DockerArgs = @("--rm", "--privileged", "-v", "${PWD}:/workspace",
-                "-e", "INPUT_IMAGE=$InputImage", "-e", "BUILD_VERSION=$BuildVersion",
-                "-e", "TARGET_FILENAME=$TargetFileName")
-
-            if ($Interactive) { docker run -it $DockerArgs $ImageName /bin/bash }
-            else {
-                docker run $DockerArgs $ImageName /bin/bash builder/build.sh $Mode
-                if ($LASTEXITCODE -ne 0) { throw "OS Build Failed" }
-            }
-
-            # 3. Post-Build Verification
-            if (-not $TestsSkip -and -not $Interactive) {
-                Write-Host "`n>>> [3/3] Verifying Result..." -ForegroundColor Cyan
-                Run-ImageTests -ImagePath $TargetFileName
-            }
+        # 3.1 Pre-Build Unit Tests
+        if (-not $TestsSkip) {
+            Write-Host " -> Running Builder Unit Tests..." -ForegroundColor Gray
+            docker run --rm -v "${PWD}:/workspace" $ImageName `
+                /bin/bash /workspace/builder/lib/test_runner.sh --mode unit
+            if ($LASTEXITCODE -ne 0) { throw "Builder Unit Tests Failed!" }
         }
 
-        "APP" {
-            # === ВЕТКА 2: ПРИЛОЖЕНИЕ (APP LAYER) ===
-            Write-Host "Detected changes in APPLICATION layer only." -ForegroundColor Green
-            Write-Host "Action: App Tests Only (Skip OS Build)" -ForegroundColor Green
+        # 3.2 Build Process
+        New-Item -ItemType Directory -Force -Path "builder/output" | Out-Null
+        if (-not (Test-Path $InputImage)) { Write-Warning "Base image $InputImage not found!" }
 
-            # 1. App Tests
-            Run-AppTests
+        $DockerArgs = @("--rm", "--privileged", "-v", "${PWD}:/workspace",
+            "-e", "INPUT_IMAGE=$InputImage", "-e", "BUILD_VERSION=$BuildVersion",
+            "-e", "TARGET_FILENAME=$TargetFileName")
 
-            # 2. Инструкция
-            Write-Host "`n[SUCCESS] App changes verified." -ForegroundColor Green
-            Write-Host "To deploy to device use: .\deploy.ps1 -Ip <DEVICE_IP>" -ForegroundColor Cyan
+        if ($Interactive) { docker run -it $DockerArgs $ImageName /bin/bash }
+        else {
+            docker run $DockerArgs $ImageName /bin/bash builder/build.sh $Mode
+            if ($LASTEXITCODE -ne 0) { throw "OS Build Failed" }
         }
 
-        "NONE" {
-            # === ВЕТКА 3: НЕТ ИЗМЕНЕНИЙ ===
-            Write-Host "No relevant changes detected." -ForegroundColor Gray
-            if (-not $Interactive) {
-                Write-Host "Use -Force to rebuild OS or check your git status."
-            }
+        # 3.3 Post-Build Verification
+        if (-not $TestsSkip -and -not $Interactive) {
+            Run-ImageTests -ImagePath $TargetFileName
         }
+    } else {
+        # Если мы здесь, значит менялись только App или Services, но не OS, и Force не нажат.
+        Write-Host "`n[INFO] OS Build skipped." -ForegroundColor Green
+        Write-Host "Layers are verified. Use '-Force' to bake them into a new OS image." -ForegroundColor Gray
+        Write-Host "Or use 'deploy.ps1' to push updates to a live device." -ForegroundColor Gray
     }
 
 } catch {

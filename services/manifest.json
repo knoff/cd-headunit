@@ -1,0 +1,7 @@
+{
+  "component": "services",
+  "version": "0.1.0",
+  "dependencies": {
+    "os": ">=0.1.0"
+  }
+}

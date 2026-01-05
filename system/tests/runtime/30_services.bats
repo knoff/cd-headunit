@@ -16,13 +16,11 @@ load "test_helper"
 
 @test "Services: RFKill state is unblocked" {
     # Проверяем реальный эффект работы сервиса
-    # Если заблокировано, rfkill list покажет "Soft blocked: yes"
     run rfkill list all
     [[ "$output" != *"Soft blocked: yes"* ]]
 }
 
 @test "Services: SSH is enabled (if configured)" {
-    # Проверяем SSH, только если он должен быть (можно проверять переменную среды или наличие конфига)
     if [ -f "/etc/ssh/sshd_config" ]; then
         run systemctl is-active ssh
         [ "$status" -eq 0 ]
@@ -31,6 +29,7 @@ load "test_helper"
     fi
 }
 
-@test "Services [WARN]: Docker is active" {
-    check_optional "Docker service not running or missing" systemctl is-active docker
+@test "Services: Data Partition Resize Service is enabled" {
+    run systemctl is-enabled resize-data
+    [ "$status" -eq 0 ]
 }
