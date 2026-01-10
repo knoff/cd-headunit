@@ -54,6 +54,8 @@ function Get-BuildTargets {
     foreach ($file in $files) {
         if ($file -like "src/*") { $changed_app = $true }
         if ($file -like "services/*") { $changed_svc = $true }
+        # Trigger Services build on protocol changes
+        if ($file -like "external/cd-protocol/*") { $changed_svc = $true }
         foreach ($trigger in $os_triggers) { if ($file -like "$trigger*") { $changed_os = $true } }
     }
 
@@ -97,6 +99,18 @@ function Build-ServicesLayer {
 
     if (Test-Path "services/tests") {
         Write-Host " -> Running Services Unit Tests..." -ForegroundColor Gray
+    }
+
+    # === COPY EXTERNAL LIBS ===
+    $ProtoSrc = "external/cd-protocol/src/python"
+    $ProtoDst = "services/lib/cd_protocol"
+    if (Test-Path $ProtoSrc) {
+        Write-Host " -> Injecting cd-protocol library..." -ForegroundColor Gray
+        New-Item -ItemType Directory -Force -Path "services/lib" | Out-Null
+        if (Test-Path $ProtoDst) { Remove-Item -Recurse -Force $ProtoDst }
+        Copy-Item -Recurse -Force "$ProtoSrc/*" "services/lib/"
+    } else {
+        Write-Warning "cd-protocol source not found at $ProtoSrc"
     }
 
     Write-Host " -> Services Layer Prepared for deployment." -ForegroundColor Green

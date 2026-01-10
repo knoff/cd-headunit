@@ -26,7 +26,7 @@
 - **Зависимости:** Нет.
 - **Расположение:** `/usr`, `/lib`, `/bin` (Read-Only).
 
-### 3. Services Layer (Сервисы и Библиотеки)
+### 3. Services Layer (Инфраструктура)
 
 - **Определение:** Shared libraries (`cd-protocol`), конфигурации инфраструктуры (MQTT, DB), вспомогательные скрипты.
 - **Версия:** `services_version` (X.Y.Z, из `services/manifest.json`).

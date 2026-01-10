@@ -50,21 +50,13 @@ log_info "Installing Shared Libraries..."
 cp -v "$WORKSPACE_DIR/system/lib/hu_config.py" /mnt/dst/usr/lib/python3/dist-packages/hu_config.py
 chmod 644 /mnt/dst/usr/lib/python3/dist-packages/hu_config.py
 
-# === INTEGRATION: CD-PROTOCOL ===
-log_info "Installing cd-protocol (Python bindings)..."
-PROTO_SRC_ROOT="$WORKSPACE_DIR/external/cd-protocol/src/python"
-PY_DIST_DIR="/mnt/dst/usr/lib/python3/dist-packages"
-
-if [ -d "$PROTO_SRC_ROOT" ]; then
-    cp -v -r "$PROTO_SRC_ROOT"/* "$PY_DIST_DIR/" || log_warn "No files found in $PROTO_SRC_ROOT to copy"
-    if [ -d "$PY_DIST_DIR/cd_protocol" ]; then
-        find "$PY_DIST_DIR/cd_protocol" -type d -exec chmod 755 {} \;
-        find "$PY_DIST_DIR/cd_protocol" -type f -exec chmod 644 {} \;
-    fi
-    log_info "cd-protocol installed successfully."
-else
-    log_warn "⚠️  cd-protocol source NOT FOUND at $PROTO_SRC_DIR"
-fi
+# === INTEGRATION: PYTHON PATH RESOLUTION ===
+log_info "Configuring Python Path Resolution..."
+# Создаем .pth файл, который добавляет путь к libraries активных сервисов
+# Это позволяет импортировать библиотеки (например, cd_protocol), лежащие в Services Layer.
+echo "/run/headunit/active_services/lib" > /mnt/dst/usr/lib/python3/dist-packages/headunit-services.pth
+chmod 644 /mnt/dst/usr/lib/python3/dist-packages/headunit-services.pth
+log_info "Created headunit-services.pth linkage."
 
 # 3. Устанавливаем инструменты настройки
 log_info "Installing System Tools..."

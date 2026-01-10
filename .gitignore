@@ -39,4 +39,7 @@ Thumbs.db
 builder/output/
 
 # Local builder configuration
-builder/headunit.conf
+
+# Generated Services Libs
+services/lib/cd_protocol/
+services/lib/*.egg-info/
