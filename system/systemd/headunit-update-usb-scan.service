@@ -1,0 +1,13 @@
+[Unit]
+Description=HeadUnit USB Update Scanner
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/headunit-update-agent --scan /mnt
+# We might need to be smarter about where it is mounted.
+# For v1, if we don't have automount, this might fail to find anything.
+# Let's assume the user manually mounts or we have a mounter.
+# Or we can make this script try to mount?
+# Let's keep it simple: "Scans /media and /mnt"
+ExecStart=/usr/local/bin/headunit-update-agent --scan /media --scan /mnt

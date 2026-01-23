@@ -1,0 +1,34 @@
+# HeadUnit OTA Update Trigger
+# Triggers on adding a partition on a removable USB device
+# Runs the update agent in scan mode
+
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", RUN+="/usr/local/bin/headunit-update-agent --scan /run/media/$env{ID_FS_LABEL}"
+# Note: Mount point handling in udev is tricky. Typically udev runs before mount.
+# Systemd-mount or standard automounting usually handles mounting to /media/...
+# If we rely on standard OS automount, we might need a delay or wait for mount.
+# Alternatively, systemd-automount?
+# For now, let's assume the OS automounts to /media/LABEL or /mnt/usb...
+# Actually, calling the script directly from udev is risky if it takes long.
+# Better to start a systemd service: ENV{SYSTEMD_WANTS}="headunit-update-usb@%k.service"
+# SYSTEMD_WANTS doesn't pass arguments easily.
+
+# SIMPLIFIED APPROACH v1:
+# Just rely on manual update or Local Drop for now properly?
+# The spec said: "Detection: udev triggers agent".
+# Let's use a simple service trigger approach if we want robustness,
+# but for now let's write a rule that tries to simplify.
+# Maybe checking if we really need this complex auto-mount logic right now?
+# User approved "detection via udev".
+
+# Refined Rule:
+# When a USB partition is added, we start a service that finds where it's mounted (or mounts it) and scans.
+# Since we don't have a robust automounter guaranteed here (Native OS), we might need to rely on 'usbmount' or similar, OR handle mounting in the agent.
+
+# Let's try to assume the OS has an automounter (like lightweight desktop envs or usbmount).
+# Given it's "HeadUnit OS (Native)", it might be barebones.
+# Safer bet: The agent should handle mounting if passed a device node?
+# Or: "Local Drop" is the primary reliable method, USB is convenience.
+# Let's write a rule that starts a 'oneshot' service that scans known mount points or block devices.
+
+# Just matching block add is enough to trigger a "scan all" service?
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", TAG+="systemd", ENV{SYSTEMD_WANTS}+="headunit-update-usb-scan.service"

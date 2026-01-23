@@ -1,74 +1,105 @@
 <#
 .SYNOPSIS
-    Быстрая доставка кода приложения на работающее устройство (Hot Deploy).
-    Не пересобирает образ системы, обновляет только контейнеры.
+    OTA Deployment Script for HeadUnit OS.
+    Delivers update packages to a running device via SSH.
+
+.DESCRIPTION
+    Replaces the old 'deploy.ps1' that used Docker context.
+    Now functionality is focused on "Push Update":
+    1. Find latest .tar.gz package in builder/output/updates/ (or accept explicit path).
+    2. SCP to target device (/data/incoming_updates/).
+    3. Monitor progress (optional, via tailing logs or checking status).
 
 .EXAMPLE
-    .\deploy.ps1 -Ip 192.168.50.10
+    .\deploy.ps1 -Target 192.168.1.100
+    Deploy latest available package to device.
+
+.EXAMPLE
+    .\deploy.ps1 -Target 10.0.0.5 -File .\builder\output\updates\headunit-services-v0.5.0.tar.gz
+    Deploy specific package.
 #>
+
 param(
     [Parameter(Mandatory=$true)]
-    [string]$Ip,
+    [string]$Target, # IP address or Hostname
 
-    [string]$User = "cdreborn",
-    [string]$KeyFile = "$HOME\.ssh\id_rsa" # Путь к вашему ключу, если есть
+    [string]$User = "root", # Default user (root for dev, or pi/admin)
+    [string]$File,          # Path to .tar.gz package. If empty, finds latest.
+    [switch]$Reboot,        # Force reboot after (usually agent handles it)
+    [switch]$Log            # Follow logs after push
 )
 
 $ErrorActionPreference = "Stop"
 
-# Пути на хосте (Windows)
-$LocalSrc = "src"
-$LocalDeploy = "deploy"
-$LocalServices = "services"
+# --- HELPERS ---
 
-# Пути на устройстве (Raspberry Pi)
-# Мы договорились, что код живет в /data (rw раздел), а конфиги запуска в /opt
-$RemoteAppDir = "/data/app"
-$RemoteConfigDir = "/opt/headunit"
+function Get-LatestUpdate {
+    $Dir = "builder/output/updates"
+    if (-not (Test-Path $Dir)) { throw "No updates found in $Dir. Run build.ps1 first." }
 
-Write-Host ">>> HeadUnit Hot Deploy" -ForegroundColor Cyan
-Write-Host "Target: $User@$Ip" -ForegroundColor Yellow
+    $Latest = Get-ChildItem -Path $Dir -Filter "*.tar.gz" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $Latest) { throw "No .tar.gz files found in $Dir." }
 
-# 1. ПРОВЕРКА СВЯЗИ
-Write-Host "`n[1/4] Checking connection..."
-$Ping = Test-Connection -ComputerName $Ip -Count 1 -Quiet
-if (-not $Ping) {
-    Write-Error "Device $Ip is unreachable!"
+    return $Latest.FullName
+}
+
+# --- MAIN ---
+
+try {
+    Write-Host ">>> [DEPLOY] HeadUnit OTA Updater" -ForegroundColor Cyan
+
+    # 1. Select File
+    $PackagePath = $File
+    if (-not $PackagePath) {
+        Write-Host " -> Searching for latest package..." -ForegroundColor Gray
+        $PackagePath = Get-LatestUpdate
+    }
+
+    if (-not (Test-Path $PackagePath)) { throw "Package not found: $PackagePath" }
+
+    $PackageName = Split-Path $PackagePath -Leaf
+    $ShaFile = "$PackagePath.sha256"
+
+    if (-not (Test-Path $ShaFile)) {
+        Write-Warning "Checksum file missing for $PackageName! Agent might reject it."
+        # Optional: Generate it on the fly?
+        # Get-FileHash ... but format must match linux sha256sum
+    }
+
+    Write-Host " -> Package: $PackageName" -ForegroundColor Yellow
+    Write-Host " -> Target:  $User@$Target" -ForegroundColor Yellow
+
+    # 2. Preparation (Ensure dir exists)
+    Write-Host "`n>>> [SSH] Preparing target..." -ForegroundColor Magenta
+    $RemoteDir = "/data/incoming_updates"
+
+    # Теперь мы ожидаем, что прав пользователя достаточно, либо ssh настроен
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$User@$Target" "mkdir -p $RemoteDir"
+    if ($LASTEXITCODE -ne 0) { throw "SSH Connection Failed (mkdir)" }
+
+    # 3. Transfer
+    Write-Host "`n>>> [SCP] Uploading..." -ForegroundColor Magenta
+
+    # Upload .tar.gz
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $PackagePath "$User@$Target`:$RemoteDir/"
+
+    # Upload .sha256 (if exists)
+    if (Test-Path $ShaFile) {
+        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $ShaFile "$User@$Target`:$RemoteDir/"
+    }
+
+    Write-Host " -> Upload Complete." -ForegroundColor Green
+
+    # 4. Monitor / Log
+    # Agent triggered by systemd-path (if installed)
+    Write-Host "`n[INFO] Update file placed. System should detect it automatically." -ForegroundColor Gray
+
+    if ($Log) {
+        Write-Host ">>> [LOG] Tailing logs (Ctrl+C to stop)..." -ForegroundColor Cyan
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$User@$Target" "journalctl -u headunit-update-monitor -u headunit-update-agent -f"
+    }
+
+} catch {
+    Write-Host "`n[ERROR] $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
-
-# Функция для SSH команд
-function Remote-Exec {
-    param([string]$Cmd)
-    # Используем ssh из Windows 10/11
-    ssh -o StrictHostKeyChecking=no "$User@$Ip" "sudo bash -c '$Cmd'"
-}
-
-# 2. ПОДГОТОВКА ПАПОК
-Write-Host "[2/4] Preparing remote directories..."
-Remote-Exec "mkdir -p $RemoteAppDir $RemoteConfigDir"
-# Даем права текущему пользователю, чтобы scp мог писать
-Remote-Exec "chown -R $User:$User $RemoteAppDir $RemoteConfigDir"
-
-# 3. СИНХРОНИЗАЦИЯ ФАЙЛОВ (SCP)
-# Windows scp не умеет exclude, поэтому копируем папки целиком
-Write-Host "[3/4] Syncing files..."
-
-# Копируем исходный код
-Write-Host "  -> Syncing src/..."
-scp -r -o StrictHostKeyChecking=no $LocalSrc "$User@$Ip:$RemoteAppDir"
-
-# Копируем сервисные конфиги
-Write-Host "  -> Syncing services/..."
-scp -r -o StrictHostKeyChecking=no $LocalServices "$User@$Ip:$RemoteAppDir"
-
-# Копируем docker-compose
-Write-Host "  -> Syncing docker-compose..."
-scp -o StrictHostKeyChecking=no "$LocalDeploy/docker-compose.yml" "$User@$Ip:$RemoteConfigDir/"
-
-# 4. ПЕРЕЗАПУСК ПРИЛОЖЕНИЯ
-Write-Host "[4/4] Restarting Containers..."
-# Мы используем --build, чтобы Docker на Pi пересобрал образ из новых файлов
-Remote-Exec "cd $RemoteConfigDir && docker compose up -d --build --remove-orphans"
-
-Write-Host "`n>>> Deploy Complete! 🚀" -ForegroundColor Green

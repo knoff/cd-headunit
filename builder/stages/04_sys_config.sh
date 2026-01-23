@@ -15,8 +15,12 @@ mount_bind /proc /mnt/dst/proc
 log_info "Injecting configurations..."
 cp -v "$WORKSPACE_DIR/system/udev/70-persistent-net.rules" /mnt/dst/etc/udev/rules.d/
 cp -v "$WORKSPACE_DIR/system/udev/99-hide-partitions.rules" /mnt/dst/etc/udev/rules.d/
+cp -v "$WORKSPACE_DIR/system/udev/99-headunit-update.rules" /mnt/dst/etc/udev/rules.d/
 cp -v "$WORKSPACE_DIR/system/systemd/rfkill-unblock.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/systemd/headunit-identity.service" /mnt/dst/etc/systemd/system/
+cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-monitor.service" /mnt/dst/etc/systemd/system/
+cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-monitor.path" /mnt/dst/etc/systemd/system/
+cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-usb-scan.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
 
 # Скрипт оверлея
@@ -68,6 +72,14 @@ chmod +x /mnt/dst/usr/local/bin/headunit-config
 cp -v "$WORKSPACE_DIR/system/bin/headunit-apply-config.py" /mnt/dst/usr/local/bin/headunit-apply-config
 chmod +x /mnt/dst/usr/local/bin/headunit-apply-config
 
+cp -v "$WORKSPACE_DIR/system/bin/headunit-update-agent.py" /mnt/dst/usr/local/bin/headunit-update-agent
+chmod +x /mnt/dst/usr/local/bin/headunit-update-agent
+
+# Fix line endings (CRLF -> LF) for all python scripts
+sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-config
+sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-apply-config
+sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-update-agent
+
 # === G. DATA RESIZE SERVICE ===
 log_info "Installing Data Resize Service..."
 cp -v "$WORKSPACE_DIR/system/scripts/resize-data" /mnt/dst/usr/local/bin/resize-data
@@ -95,12 +107,50 @@ else
     log_warn "Runtime tests directory not found. Skipping."
 fi
 
-# 3. Data папки
+mkdir -p /mnt/dst/data
+mkdir -p /mnt/dst/mnt/ram-overlay
+
+# === MOUNT DATA PARTITION ===
+# Мы должны примонтировать реальную Data партицию, чтобы mkdir/chown там сохранились
+# LOOP_DST экспортирован из 01 stage, но прошло много времени.
+# В 04 мы не знаем LOOP device напрямую, если он не передан.
+# Но, обычно в пайплайне 01 экспортирует LOOP_DST.
+# Однако, это разные скрипты. Переменные окружения между ними не шарятся автоматом если не через .env файл или единую сессию.
+# build.sh запускает их последовательно.
+# Давайте проверим loop device.
+
+if [ -z "$LOOP_DST" ]; then
+    # Fallback: ищем loop по файлу образа? Нет, так нельзя.
+    # В build.sh мы делаем losetup один раз.
+    # Проверим, доступен ли LOOP_DST.
+    echo "Using Loop Device: $LOOP_DST"
+fi
+
+if [ -b "${LOOP_DST}p8" ]; then
+    log_info "Mounting Data Partition (${LOOP_DST}p8)..."
+    mount "${LOOP_DST}p8" /mnt/dst/data
+else
+    log_error "Data partition not found! Is LOOP_DST set?"
+    # Если переменной нет, значит мы потеряли контекст.
+    # В build.sh (который вызывает этот скрипт) LOOP_SRC/DST должны быть доступны.
+fi
+
 mkdir -p /mnt/dst/data/app
 mkdir -p /mnt/dst/data/configs
 mkdir -p /mnt/dst/data/db
-mkdir -p /mnt/dst/data/components  # Для OTA обновлений
-mkdir -p /mnt/dst/mnt/ram-overlay
+mkdir -p /mnt/dst/data/components
+mkdir -p /mnt/dst/data/incoming_updates
+
+
+# Убеждаемся, что права на Data настроены на пользователя (чтобы SCP работал)
+# Это выполняется ДО чрута, но пользователь внутри образа еще может не существовать c тем же UID?
+# Лучше это делать в конце скрипта или внутри chroot если uid совпадают.
+# Но проще сделать в конце скрипта, когда мы уже знаем $SYS_USER, но UID внутри образа
+# может отличаться от хостового.
+# Поэтому правильнее это делать ВНУТРИ chroot в конце.
+
+# Здесь создаем только структуры
+
 
 # 4. CHROOT
 export SYS_ENABLE_SSH SYS_USER SYS_PASS NET_HOSTNAME NET_WIFI_COUNTRY
@@ -207,7 +257,7 @@ if [ "$SYS_ENABLE_SSH" == "yes" ]; then
     systemctl enable ssh
     if ! id "$SYS_USER" &>/dev/null; then
         useradd -m -s /bin/bash "$SYS_USER"
-        usermod -aG sudo,video,render,input,netdev,plugdev,dialout "$SYS_USER"
+        usermod -aG sudo,video,render,input,netdev,plugdev,dialout,adm,systemd-journal,disk "$SYS_USER"
     fi
     echo "$SYS_USER:$SYS_PASS" | chpasswd
     echo "root:$SYS_PASS" | chpasswd
@@ -215,6 +265,17 @@ if [ "$SYS_ENABLE_SSH" == "yes" ]; then
         pkill -u pi || true
         deluser --remove-home pi || true
     fi
+
+    # Настройка Passwordless Sudo (с защитой mount)
+    echo "Configuring Sudoers..."
+    cat > /etc/sudoers.d/010_headunit-admin <<SUDOEOF
+# HeadUnit Admin Rules
+$SYS_USER ALL=(ALL) NOPASSWD: ALL
+# Require password for critical FS operations
+$SYS_USER ALL=(ALL) PASSWD: /usr/bin/mount, /bin/mount, /usr/sbin/mount
+$SYS_USER ALL=(ALL) PASSWD: /usr/bin/umount, /bin/umount, /usr/sbin/umount
+SUDOEOF
+    chmod 0440 /etc/sudoers.d/010_headunit-admin
 fi
 
 # Настройка NetworkManager
@@ -293,6 +354,10 @@ fi
 
 chown root:root /etc/NetworkManager/system-connections/*.nmconnection
 
+# --- H. DATA PERMISSIONS ---
+mkdir -p /data/incoming_updates
+chown -R $SYS_USER:$SYS_USER /data
+
 EOF
 
 # --- F. COMPONENT INSTALLATION (NATIVE) ---
@@ -328,6 +393,7 @@ cp -v "$WORKSPACE_DIR/system/systemd/headunit-boot-linker.service" /mnt/dst/etc/
 
 # Активируем Boot Linker
 chroot /mnt/dst systemctl enable headunit-boot-linker.service
+chroot /mnt/dst systemctl enable headunit-update-monitor.path
 
 # --- G. VERSIONING & RELEASE FILE ---
 # Обработка версий: убираем 'v' из тегов для внутренних нужд
@@ -380,5 +446,6 @@ umount_safe /mnt/dst/proc
 umount_safe /mnt/dst/sys
 umount_safe /mnt/dst/dev/pts
 umount_safe /mnt/dst/dev
+umount_safe /mnt/dst/data
 
 log_info "OS Configuration Complete."

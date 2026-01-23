@@ -20,6 +20,7 @@ log_info "Target Size: ${TOTAL_SIZE} MB"
 log_info "Layout: Boot=${PART_BOOT_SIZE}, A=${PART_ROOT_A_SIZE}, B=${PART_ROOT_B_SIZE}, Fact=${PART_FACTORY_SIZE}, Data=${PART_DATA_SIZE}"
 
 # 2. Создание пустого файла
+rm -f "$OUTPUT_FILE"
 dd if=/dev/zero of="$OUTPUT_FILE" bs=1M count=0 seek="$TOTAL_SIZE" status=none
 
 # 3. Разметка диска (parted)
@@ -76,5 +77,7 @@ mkfs.ext4 -q -L rootfs_A "${LOOP_DST}p5"
 mkfs.ext4 -q -L rootfs_B "${LOOP_DST}p6"
 mkfs.ext4 -q -L factory "${LOOP_DST}p7"
 mkfs.ext4 -q -L data "${LOOP_DST}p8"
+sync
+udevadm settle
 
 log_info "Image created and mounted at $LOOP_DST"

@@ -1,0 +1,7 @@
+[Unit]
+Description=HeadUnit Update Agent (Local Drop)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/headunit-update-agent --scan /data/incoming_updates

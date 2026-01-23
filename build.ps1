@@ -16,6 +16,7 @@ param(
     [switch]$ListTags,
     [switch]$Interactive,
     [switch]$Force, # Принудительно собрать образ, даже если менялся только App
+    [switch]$ForceComponents, # Принудительно собрать только App и Services (без OS)
 
     # Testing Parameters
     [switch]$TestsSkip,       # Пропустить тесты
@@ -34,6 +35,7 @@ function Get-GitVersion {
 function Get-BuildTargets {
     # Если Force - собираем всё (App + Svc) и обязательно OS
     if ($Force) { return @("APP", "SERVICES", "OS") }
+    if ($ForceComponents) { return @("APP", "SERVICES") }
 
     # Логика определения области изменений
     $dirty = git status --porcelain
@@ -87,6 +89,15 @@ function Build-AppLayer {
     }
 
     Write-Host " -> App Layer Prepared for deployment." -ForegroundColor Green
+
+    # === PACKAGE UPDATE ARTIFACT ===
+    $Version = "0.0.0"
+    if (Test-Path "src/manifest.json") {
+         $Json = Get-Content "src/manifest.json" | ConvertFrom-Json
+         $Version = $Json.version
+    }
+
+    Package-Artifact -SourceDir "src" -ComponentName "app" -VersionString $Version
 }
 
 function Build-ServicesLayer {
@@ -99,6 +110,20 @@ function Build-ServicesLayer {
 
     if (Test-Path "services/tests") {
         Write-Host " -> Running Services Unit Tests..." -ForegroundColor Gray
+    }
+
+    # === INSTALL SHARED DEPENDENCIES ===
+    if (Test-Path "services/requirements.txt") {
+        Write-Host " -> Installing Shared Python Dependencies..." -ForegroundColor Gray
+        New-Item -ItemType Directory -Force -Path "services/lib" | Out-Null
+
+        # Run pip inside Docker to ensure Linux binaries (aarch64/x86 compat)
+        # We use the builder image which has python3 and pip
+        $DockerArgs = @("--rm", "-v", "${PWD}:/workspace", $ImageName, "/bin/bash", "-c")
+        $Cmd = "pip3 install -r /workspace/services/requirements.txt --target /workspace/services/lib --upgrade --platform manylinux2014_aarch64 --only-binary=:all:"
+
+        docker run $DockerArgs $Cmd
+        if ($LASTEXITCODE -ne 0) { throw "Dependency Installation Failed!" }
     }
 
     # === COPY EXTERNAL LIBS ===
@@ -114,6 +139,77 @@ function Build-ServicesLayer {
     }
 
     Write-Host " -> Services Layer Prepared for deployment." -ForegroundColor Green
+
+    # === PACKAGE UPDATE ARTIFACT ===
+    # Auto-pack on any build
+    $Version = "0.0.0"
+    if (Test-Path "services/manifest.json") {
+         $Json = Get-Content "services/manifest.json" | ConvertFrom-Json
+         $Version = $Json.version
+    }
+
+    # Add dev suffix if not release
+    # (Simplified logic: always dev for now unless strict flag provided, but we don't have one yet)
+    # For now, let's just stick to manifest version for simplicity of v1
+
+    Package-Artifact -SourceDir "services" -ComponentName "services" -VersionString $Version
+}
+
+function Package-Artifact {
+    param(
+        [string]$SourceDir,
+        [string]$ComponentName,
+        [string]$VersionString
+    )
+
+    Write-Host "`n>>> [PACK] Packaging $ComponentName v$VersionString..." -ForegroundColor Cyan
+
+    $UpdatesDir = "builder/output/updates"
+    New-Item -ItemType Directory -Force -Path $UpdatesDir | Out-Null
+
+    $TarName = "headunit-${ComponentName}-v${VersionString}.tar.gz"
+
+    # Docker magic to preserve permissions
+    # We mount source at /tmp/src and output at /tmp/out
+    $DockerArgs = @("--rm", "-v", "${PWD}:/workspace", $ImageName, "/bin/bash", "-c")
+
+    # Command inside container:
+    # 1. Copy to temp dir to avoid messing with host file perms (optional, but cleaner)
+    #    Actually better to just tar from source but use --mode force options if tar supports it,
+    #    OR copy to a temp staging area inside container, chmod there, and tar.
+    #    Staging area is safer.
+
+    $Cmd = "
+        mkdir -p /tmp/pkg/$VersionString
+        cp -r /workspace/$SourceDir/* /tmp/pkg/$VersionString/
+
+        # Force Permissions
+        chmod -R 755 /tmp/pkg/$VersionString
+        find /tmp/pkg/$VersionString -type f -exec chmod 644 {} \;
+        # Detect executables (bin dir) or .sh/.py files if needed
+        # For now, simplistic approach: if it looks like a script/bin, chmod +x
+        # But we don't have many bins in services yet.
+
+        # Create Tar
+        cd /tmp/pkg
+        tar -czf /workspace/$UpdatesDir/$TarName $VersionString
+
+        # Checksum
+        cd /workspace/$UpdatesDir
+        sha256sum $TarName > $TarName.sha256
+
+        # Cleanup
+        rm -rf /tmp/pkg
+    "
+
+    docker run $DockerArgs $Cmd
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Packaging failed!"
+    } else {
+        Write-Host " -> Artifact: $UpdatesDir/$TarName" -ForegroundColor Green
+        Write-Host " -> Checksum: $UpdatesDir/$TarName.sha256" -ForegroundColor Green
+    }
 }
 
 function Run-ImageTests {
@@ -156,7 +252,7 @@ try {
 
     # Сборка контейнера (нужен всегда, даже для юнит-тестов)
     if (-not $Test) { Write-Host ">>> [INIT] Preparing Builder Environment..." -ForegroundColor Gray }
-    docker build -t $ImageName -f builder/Dockerfile . | Out-Null
+    docker build -t $ImageName -f builder/Dockerfile .
 
     # --- РЕЖИМ: ТОЛЬКО ТЕСТЫ (-Test) ---
     if ($Test) {
@@ -221,8 +317,11 @@ try {
 
         if ($Interactive) { docker run -it $DockerArgs $ImageName /bin/bash }
         else {
+            $BuildStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
             docker run $DockerArgs $ImageName /bin/bash builder/build.sh $Mode
             if ($LASTEXITCODE -ne 0) { throw "OS Build Failed" }
+            $BuildStopwatch.Stop()
+            Write-Host ">>> [TIMER] Build took: $($BuildStopwatch.Elapsed.ToString('mm\:ss'))" -ForegroundColor Cyan
         }
 
         # 3.3 Post-Build Verification

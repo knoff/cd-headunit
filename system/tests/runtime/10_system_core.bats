@@ -25,3 +25,9 @@
     run grep "ID=headunit" "/etc/headunit-release"
     [ "$status" -eq 0 ]
 }
+
+@test "System: Python 3.13 is installed" {
+    run python3 --version
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Python 3.13" ]]
+}

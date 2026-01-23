@@ -1,0 +1,9 @@
+[Unit]
+Description=Monitor /data/incoming_updates for new packages
+
+[Path]
+PathExistsGlob=/data/incoming_updates/*.tar.gz
+Unit=headunit-update-monitor.service
+
+[Install]
+WantedBy=multi-user.target

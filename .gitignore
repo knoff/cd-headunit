@@ -41,5 +41,4 @@ builder/output/
 # Local builder configuration
 
 # Generated Services Libs
-services/lib/cd_protocol/
-services/lib/*.egg-info/
+services/lib/
