@@ -190,6 +190,11 @@ apt-get install -y --no-install-recommends \
     python3-pip \
     cloud-guest-utils
 
+# Установка зависимостей из requirements.txt (единое окружение)
+if [ -f "/opt/headunit/factory/services/requirements.txt" ]; then
+    pip3 install --no-cache-dir -r /opt/headunit/factory/services/requirements.txt
+fi
+
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 
@@ -372,6 +377,17 @@ mkdir -p /mnt/dst/run/headunit
 # App
 if [ -d "$WORKSPACE_DIR/src" ]; then
     cp -r "$WORKSPACE_DIR/src"/* /mnt/dst/opt/headunit/factory/app/
+
+    # Cleanup frontend in factory image
+    if [ -d "/mnt/dst/opt/headunit/factory/app/frontend" ]; then
+        if [ -d "/mnt/dst/opt/headunit/factory/app/frontend/dist" ]; then
+             log_info "Cleaning up factory frontend sources..."
+             mv /mnt/dst/opt/headunit/factory/app/frontend/dist /tmp/dist_factory_tmp
+             rm -rf /mnt/dst/opt/headunit/factory/app/frontend/*
+             mv /tmp/dist_factory_tmp /mnt/dst/opt/headunit/factory/app/frontend/dist
+        fi
+    fi
+
     # Если нет манифеста, создаем дефолтный (защита от сбоя билда)
     if [ ! -f "/mnt/dst/opt/headunit/factory/app/manifest.json" ]; then
         echo '{"component":"app","version":"0.0.0","dependencies":{"services":">=0.0.0"}}' > /mnt/dst/opt/headunit/factory/app/manifest.json
@@ -390,9 +406,11 @@ fi
 cp -v "$WORKSPACE_DIR/system/bin/headunit-boot-linker.py" /mnt/dst/usr/local/bin/headunit-boot-linker
 chmod +x /mnt/dst/usr/local/bin/headunit-boot-linker
 cp -v "$WORKSPACE_DIR/system/systemd/headunit-boot-linker.service" /mnt/dst/etc/systemd/system/
+cp -v "$WORKSPACE_DIR/system/systemd/headunit-service-activator.service" /mnt/dst/etc/systemd/system/
 
-# Активируем Boot Linker
+# Активируем базовые системные сервисы
 chroot /mnt/dst systemctl enable headunit-boot-linker.service
+chroot /mnt/dst systemctl enable headunit-service-activator.service
 chroot /mnt/dst systemctl enable headunit-update-monitor.path
 
 # --- G. VERSIONING & RELEASE FILE ---

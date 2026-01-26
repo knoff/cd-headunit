@@ -1,0 +1,12 @@
+[Unit]
+Description=HeadUnit Service Activator (Dynamic Layers)
+After=multi-user.target
+Requires=headunit-boot-linker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/headunit-boot-linker --activate
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

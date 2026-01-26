@@ -146,7 +146,61 @@ def create_symlink(target, link_name):
 # --- MAIN ---
 
 
+import subprocess
+
+def activate_systemd_units(layer_path):
+    """
+    Ищет .service файлы в папке systemd внутри слоя и активирует их.
+    Использует /run/systemd/system для временных юнитов.
+    """
+    unit_src_dir = os.path.join(layer_path, "systemd")
+    if not os.path.exists(unit_src_dir):
+        return
+
+    volatile_dir = "/run/systemd/system"
+    if not os.path.exists(volatile_dir):
+        os.makedirs(volatile_dir)
+
+    units = [f for f in os.listdir(unit_src_dir) if f.endswith(".service")]
+    if not units:
+        return
+
+    print(f"  -> Linking {len(units)} units from {layer_path}")
+    for unit in units:
+        src = os.path.join(unit_src_dir, unit)
+        dst = os.path.join(volatile_dir, unit)
+
+        # Создаем симлинк в runtime-папке systemd
+        if os.path.islink(dst) or os.path.exists(dst):
+            os.remove(dst)
+        os.symlink(src, dst)
+        print(f"     LINK: {unit} -> {src}")
+
+
+def reload_and_restart():
+    """Безопасная активация юнитов, когда система готова."""
+    print(">>> Activating Layer Services...")
+    subprocess.run(["systemctl", "daemon-reload"])
+
+    # Ищем все юниты в /run/systemd/system, которые мы залинковали
+    volatile_dir = "/run/systemd/system"
+    if os.path.exists(volatile_dir):
+        units = [f for f in os.listdir(volatile_dir) if f.startswith("headunit-") and f.endswith(".service")]
+        for unit in units:
+            print(f"  -> Activating: {unit}")
+            subprocess.run(["systemctl", "enable", unit], capture_output=True)
+            subprocess.run(["systemctl", "restart", unit], capture_output=True)
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--activate", action="store_true", help="Only reload and restart services")
+    args = parser.parse_args()
+
+    if args.activate:
+        reload_and_restart()
+        return
+
     if not os.path.exists(RUNTIME_DIR):
         os.makedirs(RUNTIME_DIR)
 
@@ -154,26 +208,20 @@ def main():
     os_ver = get_os_version()
     print(f"BOOT-LINKER: OS Version detected: {os_ver}")
 
-    # 2. Выбираем Services (зависят от OS)
+    # 2. Выбираем Services
     best_services = find_best_component("services", "os", os_ver)
+    if best_services:
+        print(f"SELECTED: Services v{best_services['version']}")
+        create_symlink(best_services["path"], "active_services")
+        activate_systemd_units(best_services["path"])
 
-    if not best_services:
-        print("CRITICAL: No valid Services found compatible with this OS!")
-        sys.exit(1)
-
-    print(f"SELECTED: Services v{best_services['version']}")
-    create_symlink(best_services["path"], "active_services")
-
-    # 3. Выбираем App (зависит от Services)
-    services_ver = best_services["version"]
+    # 3. Выбираем App
+    services_ver = best_services["version"] if best_services else "0.0.0"
     best_app = find_best_component("app", "services", services_ver)
-
-    if not best_app:
-        print("CRITICAL: No valid App found compatible with selected Services!")
-        sys.exit(1)
-
-    print(f"SELECTED: App v{best_app['version']}")
-    create_symlink(best_app["path"], "active_app")
+    if best_app:
+        print(f"SELECTED: App v{best_app['version']}")
+        create_symlink(best_app["path"], "active_app")
+        activate_systemd_units(best_app["path"])
 
 
 if __name__ == "__main__":
