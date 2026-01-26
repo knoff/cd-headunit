@@ -1,0 +1,17 @@
+[Unit]
+Description=HeadUnit Backend Service (FastAPI)
+After=headunit-boot-linker.service network.target
+Requires=headunit-boot-linker.service
+
+[Service]
+Type=simple
+User=cdreborn
+WorkingDirectory=/run/headunit/active_app/backend
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
