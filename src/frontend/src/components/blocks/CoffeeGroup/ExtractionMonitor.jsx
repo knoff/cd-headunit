@@ -5,7 +5,7 @@ import IconButton from '../../ui/IconButton';
 
 const ExtractionMonitor = ({ data, t, isCompact, onStop, side }) => {
   return (
-    <div className="flex flex-col h-full animate-in fade-in duration-500">
+    <div className="flex flex-col h-full animate-in fade-in duration-300">
       <div className="grid grid-cols-2 gap-x-[1.5rem] gap-y-[1.25rem] mb-[1.5rem]">
         <MetricRow
           label={t('temp')}

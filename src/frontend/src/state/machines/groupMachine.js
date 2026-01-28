@@ -41,10 +41,17 @@ export const groupReducer = (state, action) => {
       };
 
     case GroupTransitions.STOP:
+      return {
+        ...state,
+        status: GroupStates.SUMMARY,
+        endReason: 'cancelled',
+      };
+
     case GroupTransitions.FINISH:
       return {
         ...state,
         status: GroupStates.SUMMARY,
+        endReason: 'done',
       };
 
     case GroupTransitions.BACK_TO_IDLE:
@@ -52,6 +59,7 @@ export const groupReducer = (state, action) => {
         status: GroupStates.IDLE,
         profile: null,
         data: null,
+        endReason: null,
       };
 
     case GroupTransitions.START_CLEANING:

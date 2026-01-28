@@ -8,7 +8,7 @@ const mockGraphData = Array.from({ length: 40 }, (_, i) => ({
 }));
 
 const DetailedGraph = ({ profileName, t }) => (
-  <div className="flex h-full w-full flex-col overflow-hidden animate-in fade-in duration-700">
+  <div className="flex h-full w-full flex-col overflow-hidden animate-in fade-in duration-300">
     <div className="flex-1 relative bg-white/5 rounded-[1.5rem] p-[1.5rem] border border-white/5">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={mockGraphData} margin={{ top: 20, right: 30, left: -20, bottom: 20 }}>

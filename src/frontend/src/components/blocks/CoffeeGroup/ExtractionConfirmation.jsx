@@ -4,7 +4,7 @@ import IconButton from '../../ui/IconButton';
 
 const ExtractionConfirmation = ({ profile, onConfirm, onCancel, t }) => {
   return (
-    <div className="flex flex-col h-full bg-accent-red/5 rounded-[1.5rem] p-[1.5rem] border border-accent-red/10 animate-in fade-in zoom-in duration-300">
+    <div className="flex flex-col h-full bg-accent-red/5 rounded-[1.5rem] p-[1.5rem] border border-accent-red/10 animate-in fade-in duration-300">
       <div className="flex-1 flex flex-col items-center justify-center text-center">
         <span className="text-text-muted text-[0.75rem] font-black uppercase tracking-widest mb-[0.5rem]">
           {t('ready_to_start') || 'Готов к запуску'}

@@ -6,24 +6,24 @@ const AuxiliaryBlock = ({ time, date, status, isExpanded, isMinimal, onToggleExp
   return (
     <div
       className={cn(
-        'flex h-full flex-col rounded-[2.5rem] bg-surface p-[1.5rem] border border-white/5 shadow-premium overflow-hidden transition-all duration-500',
+        'flex h-full flex-col rounded-[2.5rem] bg-surface p-[1.5rem] border border-white/5 shadow-premium overflow-hidden transition-all duration-300',
         isMinimal && 'px-[1rem] pt-[2rem]',
         isExpanded && 'bg-surface-light border-white/10'
       )}
     >
       {/* Header / User Profile */}
-      <div className="flex justify-center mb-[1rem]">
+      <div className={cn('flex justify-center mb-[1rem]', isMinimal && 'mb-0')}>
         <div
           onClick={onToggleExpand}
           className={cn(
             'rounded-full bg-surface-light border-2 border-white/10 flex items-center justify-center active:scale-95 active:bg-surface-active transition-all cursor-pointer shadow-premium',
-            isMinimal ? 'h-[3.5rem] w-[3.5rem]' : 'h-[4.5rem] w-[4.5rem]'
+            isMinimal ? 'h-[3rem] w-[3rem]' : 'h-[4.5rem] w-[4.5rem]'
           )}
         >
           <User
             className={cn(
               'text-text-secondary',
-              isMinimal ? 'w-[1.5rem] h-[1.5rem]' : 'w-[2rem] h-[2rem]'
+              isMinimal ? 'w-[1.25rem] h-[1.25rem]' : 'w-[2rem] h-[2rem]'
             )}
           />
         </div>
@@ -31,56 +31,78 @@ const AuxiliaryBlock = ({ time, date, status, isExpanded, isMinimal, onToggleExp
 
       {!isExpanded ? (
         // Standard / Minimal View
-        <>
+        <div className="flex-1 flex flex-col">
           <div className="flex flex-col items-center justify-center flex-1 text-center">
             <span
               className={cn(
-                'font-black font-display text-text-primary tracking-tighter leading-none',
-                isMinimal ? 'text-[2.5rem]' : 'text-[4.5rem]'
+                'font-black font-display text-text-primary tracking-tighter',
+                isMinimal
+                  ? 'text-[1.75rem] -rotate-90 py-[0.5rem] leading-none whitespace-nowrap my-[2rem]'
+                  : 'text-[4.5rem] leading-none'
               )}
             >
               {time}
             </span>
             <span
               className={cn(
-                'font-bold text-text-muted uppercase tracking-[0.2em] mt-[0.5rem]',
-                isMinimal ? 'text-[0.5rem]' : 'text-[0.75rem]'
+                'font-bold text-text-muted uppercase tracking-[0.2em]',
+                isMinimal
+                  ? 'text-[0.625rem] -rotate-90 mt-[2rem] whitespace-nowrap'
+                  : 'text-[0.75rem] mt-[0.5rem]'
               )}
             >
               {date}
             </span>
           </div>
 
-          <div className="mt-auto flex flex-col items-center gap-[1rem] pt-[1rem] border-t border-white/5">
-            <div className="flex items-center gap-[0.75rem] px-[1.5rem] py-[0.75rem] rounded-[1rem] bg-white/5 border border-white/5">
+          <div
+            className={cn(
+              'mt-auto flex flex-col items-center gap-[1rem]',
+              isMinimal ? 'pt-0 pb-[0.5rem]' : 'pt-[1rem] border-t border-white/5'
+            )}
+          >
+            {isMinimal ? (
               <div
                 className={cn(
-                  'h-[0.625rem] w-[0.625rem] rounded-full',
+                  'h-[0.75rem] w-[0.75rem] rounded-full mt-[1.5rem]',
                   status.status === 'ok'
-                    ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]'
+                    ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)] animate-pulse'
                     : status.status === 'error'
-                      ? 'bg-red-500'
-                      : 'bg-yellow-500'
+                      ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.6)]'
+                      : 'bg-yellow-500 animate-pulse'
                 )}
               />
-              <span className="text-[0.75rem] font-black text-text-secondary uppercase tracking-widest transition-opacity truncate">
-                {status.status === 'ok'
-                  ? t('ok')
-                  : status.status === 'error'
-                    ? t('error')
-                    : t('connecting')}
-              </span>
-            </div>
+            ) : (
+              <div className="flex items-center gap-[0.75rem] px-[1.5rem] py-[0.75rem] rounded-[1rem] bg-white/5 border border-white/5">
+                <div
+                  className={cn(
+                    'h-[0.625rem] w-[0.625rem] rounded-full',
+                    status.status === 'ok'
+                      ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]'
+                      : status.status === 'error'
+                        ? 'bg-red-500'
+                        : 'bg-yellow-500'
+                  )}
+                />
+                <span className="text-[0.75rem] font-black text-text-secondary uppercase tracking-widest transition-opacity truncate">
+                  {status.status === 'ok'
+                    ? t('ok')
+                    : status.status === 'error'
+                      ? t('error')
+                      : t('connecting')}
+                </span>
+              </div>
+            )}
             {!isMinimal && (
               <span className="text-[0.625rem] font-bold text-text-muted opacity-40 uppercase tracking-widest">
                 SYSTEM NODE v{status.version}
               </span>
             )}
           </div>
-        </>
+        </div>
       ) : (
         // Expanded View (Settings / Services)
-        <div className="flex-1 flex flex-col animate-in fade-in duration-500">
+        <div className="flex-1 flex flex-col animate-in fade-in duration-300">
           <div className="grid grid-cols-2 gap-[1.5rem] mt-[1rem]">
             <div className="bg-white/5 p-[1.5rem] rounded-[1.5rem] border border-white/5">
               <Settings className="w-[1.5rem] h-[1.5rem] text-text-muted mb-[0.5rem]" />

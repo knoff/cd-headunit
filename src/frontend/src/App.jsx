@@ -48,6 +48,9 @@ const useRealTimeData = () => {
   const round = (val) => Math.round(val * 10) / 10;
 
   const stopSimulation = (side) => {
+    const setData = side === 'left' ? setLeftData : setRightData;
+    setData((prev) => (prev ? { ...prev, done: true } : null));
+
     if (side === 'left' && leftInterval.current) {
       clearInterval(leftInterval.current);
       leftInterval.current = null;
@@ -62,6 +65,7 @@ const useRealTimeData = () => {
 
     // Важно: Сначала останавливаем любой текущий процесс для этой стороны
     stopSimulation(side);
+    setData(null);
 
     const intervalBucket = side === 'left' ? leftInterval : rightInterval;
     let elapsedMs = 0;
@@ -158,10 +162,10 @@ const App = () => {
         <CoffeeGroup
           side="left"
           title={t('group_l')}
+          titleShort={t('group_l_short')}
           isCompact={
-            appState !== AppStates.DASHBOARD &&
-            appState !== AppStates.FOCUS_LEFT &&
-            appState !== AppStates.FOCUS_BOTH
+            (appState === AppStates.FOCUS_RIGHT || appState === AppStates.FOCUS_BOTH) &&
+            appState !== AppStates.SYSTEM_EXPANDED
           }
           isExpanded={appState === AppStates.FOCUS_LEFT || appState === AppStates.FOCUS_BOTH}
           isMinimal={appState === AppStates.SYSTEM_EXPANDED}
@@ -173,7 +177,12 @@ const App = () => {
         />
 
         {/* BLOCK 2: TEA GROUP */}
-        <TeaGroupCard data={tea} isMinimal={appState !== AppStates.DASHBOARD} t={t} />
+        <TeaGroupCard
+          data={tea}
+          titleShort={t('tea_short')}
+          isMinimal={appState === AppStates.FOCUS_BOTH || appState === AppStates.SYSTEM_EXPANDED}
+          t={t}
+        />
 
         {/* BLOCK 3: CENTRAL SYSTEM PANEL */}
         <div className="flex flex-col items-center p-[2rem] bg-surface-active/20 rounded-[2rem] border border-white/5 backdrop-blur-md overflow-hidden transition-all">
@@ -182,6 +191,13 @@ const App = () => {
               icon={Settings}
               size="w-[1.75rem] h-[1.75rem]"
               className="h-[4.5rem] w-[4.5rem] rounded-[1.75rem]"
+              onClick={() => {
+                const isLeftExtracting = left && !left.done;
+                const isRightExtracting = right && !right.done;
+                if (!isLeftExtracting && !isRightExtracting) {
+                  sendApp(AppTransitions.TOGGLE_SYSTEM);
+                }
+              }}
             />
             <IconButton
               icon={Bell}
@@ -207,7 +223,11 @@ const App = () => {
           time={formattedTime}
           date={formattedDate}
           status={systemStatus}
-          isMinimal={appState !== AppStates.DASHBOARD && appState !== AppStates.SYSTEM_EXPANDED}
+          isMinimal={
+            appState === AppStates.FOCUS_LEFT ||
+            appState === AppStates.FOCUS_RIGHT ||
+            appState === AppStates.FOCUS_BOTH
+          }
           isExpanded={appState === AppStates.SYSTEM_EXPANDED}
           onToggleExpand={() => sendApp(AppTransitions.TOGGLE_SYSTEM)}
           t={t}
@@ -217,10 +237,10 @@ const App = () => {
         <CoffeeGroup
           side="right"
           title={t('group_r')}
+          titleShort={t('group_r_short')}
           isCompact={
-            appState !== AppStates.DASHBOARD &&
-            appState !== AppStates.FOCUS_RIGHT &&
-            appState !== AppStates.FOCUS_BOTH
+            (appState === AppStates.FOCUS_LEFT || appState === AppStates.FOCUS_BOTH) &&
+            appState !== AppStates.SYSTEM_EXPANDED
           }
           isExpanded={appState === AppStates.FOCUS_RIGHT || appState === AppStates.FOCUS_BOTH}
           isMinimal={appState === AppStates.SYSTEM_EXPANDED}

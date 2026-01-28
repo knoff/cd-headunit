@@ -13,9 +13,11 @@ import { useMachine } from '../../../hooks/useMachine';
 
 const CoffeeGroup = ({
   title,
+  titleShort,
   side,
   isCompact,
   isExpanded,
+  isMinimal,
   onToggleExpand,
   onStartSimulation,
   onStopSimulation,
@@ -38,12 +40,16 @@ const CoffeeGroup = ({
     if (onStopSimulation) {
       onStopSimulation();
     }
+    // Если мы были развернуты (график), сворачиваемся при ручной остановке
+    if (isExpanded && onToggleExpand) {
+      onToggleExpand();
+    }
   };
 
   const handleDone = () => {
     send(GroupTransitions.BACK_TO_IDLE);
-    // Если мы были развернуты, то при нажатии OK в SUMMARY стоит свернуть блок
-    if (isExpanded) {
+    // Сворачиваем блок при выходе из SUMMARY (если еще не свернули при handleStop)
+    if (isExpanded && onToggleExpand) {
       onToggleExpand();
     }
   };
@@ -63,16 +69,19 @@ const CoffeeGroup = ({
   return (
     <div
       className={cn(
-        'flex h-full flex-col rounded-[2.5rem] bg-surface p-[1.5rem] border border-white/5 shadow-premium overflow-hidden transition-all duration-500',
-        isCompact && 'w-[15rem] p-[1.5rem]',
+        'flex h-full flex-col rounded-[2.5rem] bg-surface p-[1.5rem] border border-white/5 shadow-premium overflow-hidden transition-all duration-300',
+        isCompact && 'p-[1.5rem]',
+        isMinimal && 'px-[0.5rem] py-[1.5rem] items-center',
         isExpanded && 'bg-surface-light border-white/10'
       )}
     >
       <CardHeader
         title={title}
+        titleShort={titleShort}
         subtitle={isActive && state.profile ? state.profile.name : t('standby')}
         icon={isActive ? (isExpanded ? LayoutGrid : LineChart) : Coffee}
         isCompact={isCompact}
+        isMinimal={isMinimal}
         isAccent={isActive}
         onIconClick={onToggleExpand}
         centerAction={
@@ -87,7 +96,12 @@ const CoffeeGroup = ({
         }
       />
 
-      <div className="flex-1 flex flex-col min-h-0 relative">
+      <div
+        className={cn(
+          'flex-1 flex flex-col min-h-0 relative transition-all duration-300',
+          isMinimal ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'
+        )}
+      >
         {isExpanded ? (
           <DetailedGraph profileName={state.profile?.name} t={t} />
         ) : (
@@ -127,6 +141,7 @@ const CoffeeGroup = ({
               <ExtractionSummary
                 data={realTimeData || { yield: 0, time: '0:00' }}
                 profile={state.profile}
+                reason={state.endReason || 'done'}
                 onDone={handleDone}
                 t={t}
               />
