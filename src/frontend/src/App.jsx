@@ -8,6 +8,9 @@ import AuxiliaryBlock from './components/blocks/Auxiliary/AuxiliaryBlock';
 import { useMachine } from './hooks/useMachine';
 import { AppStates, AppTransitions, appReducer } from './state/machines/appMachine';
 import { TRANSLATIONS } from './constants/translations';
+import { KeyboardProvider } from './hooks/useKeyboard';
+import VirtualKeyboard from './components/ui/Keyboard/VirtualKeyboard';
+import SettingsView from './views/Settings/SettingsView';
 
 // Репликация хука данных для совместимости с текущим состоянием симуляции
 const useRealTimeData = () => {
@@ -251,8 +254,26 @@ const App = () => {
           t={t}
         />
       </DashboardGrid>
+
+      {/* Оверлей настроек (когда развернут системный блок) */}
+      {appState === AppStates.SYSTEM_EXPANDED && (
+        <div className="fixed inset-0 z-50 p-[3rem] bg-black/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-300">
+          <div className="w-full max-w-[80rem]">
+            <SettingsView onClose={() => sendApp(AppTransitions.TOGGLE_SYSTEM)} t={t} />
+          </div>
+        </div>
+      )}
+
+      {/* Глобальная виртуальная клавиатура */}
+      <VirtualKeyboard t={t} />
     </div>
   );
 };
 
-export default App;
+const AppWrapper = () => (
+  <KeyboardProvider>
+    <App />
+  </KeyboardProvider>
+);
+
+export default AppWrapper;
