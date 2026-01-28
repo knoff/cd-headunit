@@ -80,3 +80,7 @@
   scrollbar-width: none;
   /* Firefox */
 }
+
+.shadow-glow-red {
+  box-shadow: 0 0 20px rgba(240, 68, 56, 0.4);
+}

@@ -17,6 +17,8 @@ import {
   Flame,
   Wind,
   Activity,
+  LineChart,
+  LayoutGrid,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -306,11 +308,17 @@ const useRealTimeData = () => {
     setter({ profile, startTime: Date.now(), currentData: null });
   };
 
+  const stopExtraction = (side) => {
+    const setter = side === 'left' ? setLeftState : setRightState;
+    setter({ profile: null, startTime: null, currentData: null });
+  };
+
   return {
     left: leftState.currentData,
     right: rightState.currentData,
     tea: teaData,
     startExtraction,
+    stopExtraction,
   };
 };
 
@@ -346,27 +354,27 @@ const MetricRow = ({
   compact = false,
   colorClass = 'text-text-primary',
 }) => (
-  <div className={cn('flex items-center justify-between', compact ? 'h-[2rem]' : 'h-[2.625rem]')}>
-    <div className="flex items-center gap-[0.75rem] overflow-hidden">
+  <div className={cn('flex items-center justify-between', compact ? 'h-[2rem]' : 'h-[3.5rem]')}>
+    <div className="flex items-center gap-[1rem] overflow-hidden">
       <div
         className={cn(
           'flex items-center justify-center rounded-[0.75rem] bg-surface-active/50 text-text-secondary shrink-0',
-          compact ? 'h-[1.5rem] w-[1.5rem]' : 'h-[2rem] w-[2rem]'
+          compact ? 'h-[1.5rem] w-[1.5rem]' : 'h-[2.5rem] w-[2.5rem]'
         )}
       >
-        <Icon className={compact ? 'w-[0.75rem] h-[0.75rem]' : 'w-[1rem] h-[1rem]'} />
+        <Icon className={compact ? 'w-[0.75rem] h-[0.75rem]' : 'w-[1.125rem] h-[1.125rem]'} />
       </div>
       <div className="flex flex-col">
         {!compact && (
-          <span className="text-[0.5625rem] font-black uppercase text-text-muted tracking-wide leading-tight">
+          <span className="text-[0.625rem] font-black uppercase text-text-muted tracking-wide leading-tight">
             {label}
           </span>
         )}
-        <div className="flex items-baseline gap-[0.25rem] overflow-hidden">
+        <div className="flex items-baseline gap-[0.375rem] overflow-hidden">
           <span
             className={cn(
-              'font-display font-bold truncate',
-              compact ? 'text-[1rem]' : 'text-[1.125rem]',
+              'font-display font-black truncate transition-all',
+              compact ? 'text-[1.125rem]' : 'text-[1.375rem]',
               colorClass
             )}
           >
@@ -374,8 +382,8 @@ const MetricRow = ({
           </span>
           <span
             className={cn(
-              'font-medium text-text-muted',
-              compact ? 'text-[0.5625rem]' : 'text-[0.625rem]'
+              'font-bold text-text-muted transition-all',
+              compact ? 'text-[0.625rem]' : 'text-[0.75rem]'
             )}
           >
             {unit}
@@ -386,20 +394,33 @@ const MetricRow = ({
   </div>
 );
 
-const CardHeader = ({ title, subtitle, icon: Icon, isCompact, isAccent = false }) => (
-  <div className={cn('flex justify-between items-start', isCompact ? 'mb-[1rem]' : 'mb-[1rem]')}>
-    <div className="flex flex-col overflow-hidden">
+const CardHeader = ({
+  title,
+  subtitle,
+  icon: Icon,
+  isCompact,
+  isAccent = false,
+  onIconClick,
+  centerAction,
+}) => (
+  <div
+    className={cn(
+      'relative flex justify-between items-start',
+      isCompact ? 'mb-[1rem]' : 'mb-[1rem]'
+    )}
+  >
+    <div className="flex flex-col overflow-hidden pr-[4rem]">
       <h2
         className={cn(
           'font-black font-display text-text-primary uppercase tracking-tight leading-none truncate',
-          isCompact ? 'text-[1.25rem]' : 'text-[1.625rem]'
+          isCompact ? 'text-[1.25rem]' : 'text-[1.25rem]'
         )}
       >
         {title}
       </h2>
       <p
         className={cn(
-          'text-[1rem] font-bold italic mt-[0.2rem] truncate transition-opacity',
+          'text-[1rem] font-bold italic truncate transition-opacity',
           isAccent ? 'text-accent-red opacity-100' : 'text-text-muted opacity-80',
           isCompact && 'hidden'
         )}
@@ -407,23 +428,35 @@ const CardHeader = ({ title, subtitle, icon: Icon, isCompact, isAccent = false }
         {subtitle}
       </p>
     </div>
-    {Icon && !isCompact && <IconButton icon={Icon} variant={isAccent ? 'accent' : 'default'} />}
-    {isCompact && isAccent && (
-      <div className="h-[1.5rem] w-[1.5rem] rounded-[0.5rem] bg-accent-red/20 border border-accent-red/30 shrink-0" />
+
+    {centerAction && (
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
+        {centerAction}
+      </div>
     )}
+
+    <div className="flex items-start gap-[1rem] shrink-0">
+      {Icon && !isCompact && <IconButton icon={Icon} onClick={onIconClick} variant="default" />}
+      {isCompact && isAccent && (
+        <div className="h-[1.5rem] w-[1.5rem] rounded-[0.5rem] bg-accent-red/20 border border-accent-red/30 shrink-0" />
+      )}
+    </div>
   </div>
 );
 
 const CoffeeGroupCard = ({
   data,
   title,
+  side,
   isCompact,
   isExpanded,
   onSelectProfile,
+  onStopExtraction,
   onCloseDetailed,
   t,
 }) => {
   const scrollRef = useRef(null);
+  const lastScrollTop = useRef(0);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
 
@@ -431,15 +464,23 @@ const CoffeeGroupCard = ({
     const el = scrollRef.current;
     if (el) {
       const { scrollTop, scrollHeight, clientHeight } = el;
+      lastScrollTop.current = scrollTop;
       setCanScrollUp(scrollTop > 5); // Some threshold
       setCanScrollDown(scrollTop + clientHeight < scrollHeight - 5);
     }
   }, []);
 
+  const isActive = data && data.active;
+  const contentHeight = isActive ? 'h-[10.625rem]' : 'h-[14rem]';
+
   useEffect(() => {
-    checkScroll();
     const el = scrollRef.current;
     if (el) {
+      // Restore scroll position
+      if (lastScrollTop.current > 0) {
+        el.scrollTop = lastScrollTop.current;
+      }
+      checkScroll();
       el.addEventListener('scroll', checkScroll);
       window.addEventListener('resize', checkScroll);
       return () => {
@@ -447,56 +488,48 @@ const CoffeeGroupCard = ({
         window.removeEventListener('resize', checkScroll);
       };
     }
-  }, [checkScroll]);
-
-  // Re-check scroll when active state or activeView changes (not directly available here but parent side-effect)
-  // Actually, profiles don't change, but we check on mount.
-  // If profiles change, we'd need them in deps.
-
-  const isActive = data && data.active;
-  const contentHeight = isActive ? 'h-[10.625rem]' : 'h-[14rem]';
+  }, [checkScroll, isActive, isExpanded]);
 
   return (
     <div
       className={cn(
-        'flex h-full flex-col rounded-[2.5rem] bg-surface p-[2rem] border border-white/5 shadow-premium overflow-hidden transition-all duration-500',
+        'flex h-full flex-col rounded-[2.5rem] bg-surface p-[1.5rem] border border-white/5 shadow-premium overflow-hidden transition-all duration-500',
         isCompact && 'w-[15rem] p-[1.5rem]',
         isExpanded && 'bg-surface-light border-white/10'
       )}
     >
       <CardHeader
         title={title}
-        subtitle={isActive ? t('active_extract') : t('standby')}
-        icon={isActive ? Zap : Coffee}
+        subtitle={isActive ? data.profileName : t('standby')}
+        icon={isActive ? (isExpanded ? LayoutGrid : LineChart) : Coffee}
         isCompact={isCompact}
         isAccent={isActive}
+        onIconClick={isActive ? () => onSelectProfile({ id: 'expand' }) : undefined}
+        centerAction={
+          isExpanded && isActive ? (
+            <IconButton
+              icon={Power}
+              variant="accent"
+              onClick={() => onStopExtraction(side)}
+              className="h-[3.5rem] w-[3.5rem] rounded-[1.25rem] shadow-glow-red"
+            />
+          ) : null
+        }
       />
 
       <div className="flex-1 flex flex-col min-h-0 relative">
         {isExpanded ? (
-          <DetailedGraph
-            profileName={isActive ? data.profileName : ''}
-            onClose={onCloseDetailed}
-            t={t}
-          />
+          <DetailedGraph profileName={isActive ? data.profileName : ''} t={t} />
         ) : (
           <>
             {isActive ? (
               <div className="flex flex-col h-full">
-                <div className="grid grid-cols-1 gap-[0.5rem] mb-[1.5rem]">
+                <div className="grid grid-cols-2 gap-x-[1.5rem] gap-y-[1.25rem] mb-[1.5rem]">
                   <MetricRow
                     label={t('temp')}
                     icon={Thermometer}
                     value={data.temp}
                     unit={t('unit_temp')}
-                    compact={isCompact}
-                    status="active"
-                  />
-                  <MetricRow
-                    label={t('press')}
-                    icon={Activity}
-                    value={data.press}
-                    unit={t('unit_press')}
                     compact={isCompact}
                     status="active"
                   />
@@ -509,6 +542,14 @@ const CoffeeGroupCard = ({
                     status="active"
                   />
                   <MetricRow
+                    label={t('press')}
+                    icon={Activity}
+                    value={data.pressure}
+                    unit={t('unit_press')}
+                    compact={isCompact}
+                    status="active"
+                  />
+                  <MetricRow
                     label={t('flow_out')}
                     icon={Droplet}
                     value={data.flowOut}
@@ -516,6 +557,8 @@ const CoffeeGroupCard = ({
                     compact={isCompact}
                     status="active"
                   />
+                </div>
+                <div className="flex justify-center mb-[2rem]">
                   <MetricRow
                     label={t('energy')}
                     icon={Zap}
@@ -525,6 +568,7 @@ const CoffeeGroupCard = ({
                     status="active"
                   />
                 </div>
+
                 <div className="mt-auto flex items-end gap-[1rem]">
                   <div className="flex-1">
                     <div className="flex justify-between items-end mb-[0.5rem]">
@@ -548,6 +592,7 @@ const CoffeeGroupCard = ({
                   <IconButton
                     icon={Power}
                     variant="accent"
+                    onClick={() => onStopExtraction(side)}
                     className="h-[3.5rem] w-[3.5rem] rounded-[1.25rem]"
                   />
                 </div>
@@ -567,16 +612,16 @@ const CoffeeGroupCard = ({
                 <div
                   ref={scrollRef}
                   className={cn(
-                    'overflow-y-auto pr-[0.5rem] -mr-[0.5rem] no-scrollbar touch-pan-y overscroll-contain select-none',
+                    'overflow-y-auto pr-[0.5rem] -mr-[0.5rem] no-scrollbar touch-pan-y overscroll-contain select-none snap-y snap-mandatory',
                     contentHeight
                   )}
                 >
-                  <div className="grid grid-cols-2 gap-[0.75rem] pb-[0.5rem]">
+                  <div className="grid grid-cols-2 gap-[0.5rem]">
                     {COFFEE_PROFILES.map((p) => (
                       <div
                         key={p.id}
                         onClick={() => onSelectProfile(p)}
-                        className="flex flex-col p-[0.75rem] h-[6rem] rounded-[1.25rem] bg-white/5 border border-white/5 active:border-white/20 active:bg-white/10 cursor-pointer transition-all shrink-0 overflow-hidden"
+                        className="flex flex-col p-[0.75rem] h-[6.75rem] rounded-[1.25rem] bg-white/5 border border-white/5 active:border-white/20 active:bg-white/10 cursor-pointer transition-all shrink-0 overflow-hidden snap-start"
                       >
                         <div className="mb-[0.5rem] border-b border-white/5 pb-[0.25rem]">
                           <span className="text-[0.8125rem] font-black text-text-primary uppercase leading-none truncate block">
@@ -594,7 +639,7 @@ const CoffeeGroupCard = ({
                             </span>
                           </div>
                           <div className="flex-1 overflow-hidden">
-                            <span className="text-[0.75rem] font-normal text-text-secondary italic leading-[1.2] line-clamp-3">
+                            <span className="text-[0.8125rem] font-normal text-text-secondary italic leading-[1.2] line-clamp-3">
                               {p.desc}
                             </span>
                           </div>
@@ -611,7 +656,7 @@ const CoffeeGroupCard = ({
                     canScrollDown ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
                   )}
                 >
-                  <div className="w-[0.375rem] h-[0.375rem] rounded-full bg-text-muted/40 shadow-glow shadow-white/10 animate-pulse" />
+                  <div className="w-[0.375rem] h-[0.375rem] rounded-full bg-text-muted/40 shadow-glow shadow-white/10" />
                 </div>
 
                 <div className="mt-auto pt-[0.5rem]">
@@ -632,7 +677,7 @@ const CoffeeGroupCard = ({
 const TeaGroupCard = ({ data, isCompact, t }) => (
   <div
     className={cn(
-      'flex h-full flex-col rounded-[2.5rem] bg-surface p-[2rem] border border-white/5 shadow-premium overflow-hidden transition-all',
+      'flex h-full flex-col rounded-[2.5rem] bg-surface p-[1.5rem] border border-white/5 shadow-premium overflow-hidden transition-all',
       isCompact && 'px-[1rem] pt-[1.5rem]'
     )}
   >
@@ -681,7 +726,7 @@ const TeaGroupCard = ({ data, isCompact, t }) => (
 const SystemStatusBlock = ({ time, date, status, isCompact, t }) => (
   <div
     className={cn(
-      'flex h-full flex-col rounded-[2.5rem] bg-surface p-[2rem] border border-white/5 shadow-premium overflow-hidden transition-all',
+      'flex h-full flex-col rounded-[2.5rem] bg-surface p-[1.5rem] border border-white/5 shadow-premium overflow-hidden transition-all',
       isCompact && 'px-[1rem] pt-[2rem]'
     )}
   >
@@ -749,25 +794,11 @@ const SystemStatusBlock = ({ time, date, status, isCompact, t }) => (
   </div>
 );
 
-const DetailedGraph = ({ onClose, profileName, t }) => (
+const DetailedGraph = ({ profileName, t }) => (
   <div className="flex h-full w-full flex-col overflow-hidden">
     <div className="flex-1 relative bg-white/5 rounded-[1.5rem] p-[1.5rem] border border-white/5">
-      <div className="absolute top-[1rem] left-[1.5rem] z-20">
-        <span className="text-[1.25rem] font-black font-display text-accent-red uppercase italic tracking-wider">
-          {profileName}
-        </span>
-      </div>
-      <div className="absolute top-[1rem] right-[1rem] z-20">
-        <IconButton
-          icon={Power}
-          onClick={onClose}
-          variant="ghost"
-          className="bg-white/5 rounded-[0.75rem]"
-        />
-      </div>
-
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={mockGraphData} margin={{ top: 40, right: 30, left: -20, bottom: 20 }}>
+        <AreaChart data={mockGraphData} margin={{ top: 20, right: 30, left: -20, bottom: 20 }}>
           <defs>
             <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#f04438" stopOpacity={0.4} />
@@ -818,7 +849,7 @@ const App = () => {
   const [activeView, setActiveView] = useState(null);
   const [systemStatus, setSystemStatus] = useState({ status: 'connecting', version: '0.1.0' });
   const [language, setLanguage] = useState('ru');
-  const { left, right, tea, startExtraction } = useRealTimeData();
+  const { left, right, tea, startExtraction, stopExtraction } = useRealTimeData();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -874,6 +905,11 @@ const App = () => {
     startExtraction(side, profile);
   };
 
+  const handleStopExtraction = (side) => {
+    stopExtraction(side);
+    setActiveView(null);
+  };
+
   return (
     <div className="app-viewport flex items-stretch p-[1.5rem] font-sans select-none overflow-hidden bg-black text-text-primary">
       <div
@@ -884,9 +920,15 @@ const App = () => {
         <CoffeeGroupCard
           data={left}
           title={t('group_l')}
+          side="left"
           isCompact={activeView !== null && activeView !== 'left'}
           isExpanded={activeView === 'left'}
-          onSelectProfile={(p) => handleSelectProfile('left', p)}
+          onSelectProfile={(p) =>
+            p.id === 'expand'
+              ? setActiveView(activeView === 'left' ? null : 'left')
+              : handleSelectProfile('left', p)
+          }
+          onStopExtraction={handleStopExtraction}
           onCloseDetailed={() => setActiveView(null)}
           t={t}
         />
@@ -938,9 +980,15 @@ const App = () => {
         <CoffeeGroupCard
           data={right}
           title={t('group_r')}
+          side="right"
           isCompact={activeView !== null && activeView !== 'right'}
           isExpanded={activeView === 'right'}
-          onSelectProfile={(p) => handleSelectProfile('right', p)}
+          onSelectProfile={(p) =>
+            p.id === 'expand'
+              ? setActiveView(activeView === 'right' ? null : 'right')
+              : handleSelectProfile('right', p)
+          }
+          onStopExtraction={handleStopExtraction}
           onCloseDetailed={() => setActiveView(null)}
           t={t}
         />
