@@ -3,6 +3,10 @@
 
 log_step "01_make_image.sh - Creating Disk Image"
 
+# Defensive unmounting of potential leftovers from previous failed builds
+recursive_umount /mnt/dst
+recursive_umount /mnt/src
+
 # 1. Расчет размера образа
 # Суммируем размеры разделов + 4MB на MBR/Padding + запас
 TOTAL_SIZE=$((PART_BOOT_SIZE + PART_ROOT_A_SIZE + PART_ROOT_B_SIZE + PART_FACTORY_SIZE + PART_DATA_SIZE + 50))

@@ -10,6 +10,7 @@ umount_safe /mnt/dst/dev/pts
 umount_safe /mnt/dst/dev
 
 umount_safe /mnt/dst/boot/firmware
+umount_safe /mnt/dst/data
 umount_safe /mnt/dst
 
 umount_safe /mnt/src/boot/firmware

@@ -27,11 +27,12 @@ const DashboardGrid = ({ children, activeState }) => {
 
   return (
     <div
-      className="grid-cols-5-segment w-full gap-[0.75rem] transition-all duration-300 ease-in-out"
+      className="grid-cols-5-segment w-full gap-[0.75rem]"
       style={{
         display: 'grid',
         gridTemplateColumns: gridTemplate,
         width: '100%',
+        transition: 'none', // Explicitly disable any transitions
       }}
     >
       {children}

@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Coffee } from 'lucide-react';
 import { COFFEE_PROFILES } from '../../../constants/profiles';
 import { cn } from '../../../utils/cn';
 
-const ProfileList = ({ onSelect, t, contentHeight }) => {
+const ProfileList = memo(({ onSelect, t, contentHeight }) => {
   return (
     <div
       className={cn(
@@ -44,6 +44,8 @@ const ProfileList = ({ onSelect, t, contentHeight }) => {
       </div>
     </div>
   );
-};
+});
+
+ProfileList.displayName = 'ProfileList';
 
 export default ProfileList;

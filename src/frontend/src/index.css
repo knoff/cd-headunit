@@ -17,7 +17,8 @@
 
     @apply bg-background text-text-primary;
     font-synthesis: none;
-    text-rendering: optimizeLegibility;
+    text-rendering: optimizeSpeed;
+    /* Changed for performance */
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -82,5 +83,11 @@
 }
 
 .shadow-glow-red {
-  box-shadow: 0 0 20px rgba(240, 68, 56, 0.4);
+  /* Reduced blur for performance */
+  box-shadow: 0 0 10px rgba(240, 68, 56, 0.3);
+}
+
+/* Hardware acceleration hints */
+.will-change-transform {
+  will-change: transform;
 }

@@ -44,3 +44,16 @@ umount_safe() {
         umount "$mnt"
     fi
 }
+
+# Рекурсивное размонтирование для очистки перед билдом
+recursive_umount() {
+    local target_dir="$1"
+    if [ ! -d "$target_dir" ]; then return; fi
+
+    log_info "Defensive cleanup of $target_dir..."
+    # Сортируем точки монтирования по длине в обратном порядке (сначала самые глубокие)
+    grep "$target_dir" /proc/mounts | cut -d' ' -f2 | sort -r | while read -r mnt; do
+        log_warn "Force unmounting leftover: $mnt"
+        umount -l "$mnt" || true
+    done
+}

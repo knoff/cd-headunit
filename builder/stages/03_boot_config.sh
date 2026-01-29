@@ -44,7 +44,8 @@ if [ -f "$CMDLINE_FILE" ]; then
     CLEAN_CMD=$(echo "$ORIG_CMD" | sed -E 's/root=PARTUUID=[^ ]+//g' | sed -E 's/init=[^ ]+//g' | sed -E 's/fsck.repair=[^ ]+//g')
 
     # Убрали 'ro'. Добавили 'fastboot' (пропуск fsck, т.к. раздел ro).
-    NEW_CMD="console=serial0,115200 console=tty1 root=PARTUUID=$UUID_ROOT_A rootfstype=ext4 fsck.mode=skip noswap rootwait"
+    # Добавили параметры для Quiet Boot: quiet loglevel=3 logo.nologo vt.global_cursor_default=0
+    NEW_CMD="console=serial0,115200 console=tty1 quiet loglevel=3 logo.nologo vt.global_cursor_default=0 root=PARTUUID=$UUID_ROOT_A rootfstype=ext4 fsck.mode=skip noswap rootwait"
     echo "$NEW_CMD $CLEAN_CMD" > "$CMDLINE_FILE"
 fi
 

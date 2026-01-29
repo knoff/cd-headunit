@@ -1,0 +1,23 @@
+[Unit]
+Description=HeadUnit Kiosk Mode
+After=headunit-boot-linker.service headunit-backend.service network.target
+Wants=headunit-boot-linker.service headunit-backend.service
+
+[Service]
+User=cdreborn
+Group=cdreborn
+Type=simple
+Environment=WL_OUTPUT_FIXED_MODE=1920x1080
+ExecStart=/usr/local/bin/headunit-kiosk
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Cage/Wayland requirements
+PAMName=login
+TTYPath=/dev/tty7
+StandardInput=tty-fail
+
+[Install]
+WantedBy=multi-user.target

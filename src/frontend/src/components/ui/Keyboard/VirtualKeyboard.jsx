@@ -119,7 +119,7 @@ const VirtualKeyboard = ({ t }) => {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-[2rem] select-none">
       <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-xl animate-in fade-in duration-500"
+        className="absolute inset-0 bg-black/85 animate-in fade-in duration-500"
         onClick={closeKeyboard}
       />
 
@@ -127,7 +127,7 @@ const VirtualKeyboard = ({ t }) => {
         {/* ЛЕВАЯ КОЛОНКА: Клавиатура */}
         <div
           className={cn(
-            'flex flex-col bg-surface/40 backdrop-blur-md border border-white/10 rounded-[2.5rem] p-[1.5rem] shadow-premium transition-all duration-300 relative',
+            'flex flex-col bg-surface/60 border border-white/10 rounded-[2.5rem] p-[1.5rem] shadow-premium transition-all duration-300 relative',
             isNum ? 'w-[32rem]' : 'w-[65rem]'
           )}
         >
@@ -305,7 +305,7 @@ const VirtualKeyboard = ({ t }) => {
         </div>
 
         {/* ПРАВАЯ КОЛОНКА: Cursor Pad */}
-        <div className="w-[10rem] flex flex-col bg-surface/20 backdrop-blur-md border border-white/10 rounded-[2.5rem] p-[1rem] shadow-premium justify-center items-center gap-[1rem]">
+        <div className="w-[10rem] flex flex-col bg-surface/40 border border-white/10 rounded-[2.5rem] p-[1rem] shadow-premium justify-center items-center gap-[1rem]">
           <div className="text-text-muted font-black text-[0.625rem] uppercase tracking-widest mb-2 opacity-50 font-display">
             Cursor
           </div>

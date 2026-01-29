@@ -21,6 +21,7 @@ cp -v "$WORKSPACE_DIR/system/systemd/headunit-identity.service" /mnt/dst/etc/sys
 cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-monitor.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-monitor.path" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-usb-scan.service" /mnt/dst/etc/systemd/system/
+cp -v "$WORKSPACE_DIR/system/systemd/headunit-kiosk.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
 
 # Скрипт оверлея
@@ -75,10 +76,14 @@ chmod +x /mnt/dst/usr/local/bin/headunit-apply-config
 cp -v "$WORKSPACE_DIR/system/bin/headunit-update-agent.py" /mnt/dst/usr/local/bin/headunit-update-agent
 chmod +x /mnt/dst/usr/local/bin/headunit-update-agent
 
+cp -v "$WORKSPACE_DIR/system/bin/headunit-kiosk.py" /mnt/dst/usr/local/bin/headunit-kiosk
+chmod +x /mnt/dst/usr/local/bin/headunit-kiosk
+
 # Fix line endings (CRLF -> LF) for all python scripts
 sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-config
 sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-apply-config
 sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-update-agent
+sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-kiosk
 
 # === G. DATA RESIZE SERVICE ===
 log_info "Installing Data Resize Service..."
@@ -181,6 +186,7 @@ apt-get install -y --no-install-recommends \
     console-common \
     console-data \
     fonts-terminus \
+    fonts-noto-core \
     kbd \
     busybox-static \
     bc \
@@ -188,7 +194,12 @@ apt-get install -y --no-install-recommends \
     python3-minimal \
     python3-venv \
     python3-pip \
-    cloud-guest-utils
+    cloud-guest-utils \
+    cage \
+    chromium \
+    libgl1-mesa-dri \
+    seatd \
+    xwayland
 
 # Установка зависимостей из requirements.txt (единое окружение)
 if [ -f "/opt/headunit/factory/services/requirements.txt" ]; then
@@ -412,6 +423,7 @@ cp -v "$WORKSPACE_DIR/system/systemd/headunit-service-activator.service" /mnt/ds
 chroot /mnt/dst systemctl enable headunit-boot-linker.service
 chroot /mnt/dst systemctl enable headunit-service-activator.service
 chroot /mnt/dst systemctl enable headunit-update-monitor.path
+chroot /mnt/dst systemctl enable headunit-kiosk.service
 
 # --- G. VERSIONING & RELEASE FILE ---
 # Обработка версий: убираем 'v' из тегов для внутренних нужд
