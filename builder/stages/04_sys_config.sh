@@ -76,14 +76,12 @@ chmod +x /mnt/dst/usr/local/bin/headunit-apply-config
 cp -v "$WORKSPACE_DIR/system/bin/headunit-update-agent.py" /mnt/dst/usr/local/bin/headunit-update-agent
 chmod +x /mnt/dst/usr/local/bin/headunit-update-agent
 
-cp -v "$WORKSPACE_DIR/system/bin/headunit-kiosk.py" /mnt/dst/usr/local/bin/headunit-kiosk
-chmod +x /mnt/dst/usr/local/bin/headunit-kiosk
+
 
 # Fix line endings (CRLF -> LF) for all python scripts
 sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-config
 sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-apply-config
 sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-update-agent
-sed -i 's/\r$//' /mnt/dst/usr/local/bin/headunit-kiosk
 
 # === G. DATA RESIZE SERVICE ===
 log_info "Installing Data Resize Service..."
@@ -410,6 +408,12 @@ if [ -d "$WORKSPACE_DIR/services" ]; then
     cp -r "$WORKSPACE_DIR/services"/* /mnt/dst/opt/headunit/factory/services/
     if [ ! -f "/mnt/dst/opt/headunit/factory/services/manifest.json" ]; then
         echo '{"component":"services","version":"0.0.0","dependencies":{"os":">=0.0.0"}}' > /mnt/dst/opt/headunit/factory/services/manifest.json
+    fi
+
+    # Ensure executables in services/bin
+    if [ -d "/mnt/dst/opt/headunit/factory/services/bin" ]; then
+        chmod +x /mnt/dst/opt/headunit/factory/services/bin/* 2>/dev/null || true
+        find /mnt/dst/opt/headunit/factory/services/bin -type f -exec sed -i 's/\r$//' {} + 2>/dev/null || true
     fi
 fi
 

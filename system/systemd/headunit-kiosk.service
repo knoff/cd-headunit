@@ -8,7 +8,8 @@ User=cdreborn
 Group=cdreborn
 Type=simple
 Environment=WL_OUTPUT_FIXED_MODE=1920x1080
-ExecStart=/usr/local/bin/headunit-kiosk
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/run/headunit/active_services/bin/headunit-kiosk.py
 Restart=always
 RestartSec=5
 StandardOutput=journal

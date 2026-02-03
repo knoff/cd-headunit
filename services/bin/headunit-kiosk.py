@@ -39,6 +39,8 @@ def get_chromium_command():
         "--enable-features=UseOzonePlatform",
         "--ozone-platform=wayland",
         "--user-data-dir=/data/app/chromium",
+        "--disk-cache-dir=" + os.environ.get("XDG_RUNTIME_DIR", "/tmp") + "/chromium_cache",
+        "--disk-cache-size=1048576", # 1MB limit (effectively disabled)
         "--no-sandbox",
         "--disable-gpu-sandbox",
         "--ignore-gpu-blocklist",
@@ -67,6 +69,18 @@ def main():
 
     # 3. Ensure user data dir on persistent storage
     os.makedirs("/data/app/chromium", exist_ok=True)
+
+    # 3b. Clean up stale locks (Fix for "Profile in use" error 21)
+    # Since we use persistent storage, a hard reboot can leave lock files.
+    # We are the only instance, so it's safe to clear them.
+    for lock_file in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
+        try:
+            path = os.path.join("/data/app/chromium", lock_file)
+            if os.path.islink(path) or os.path.exists(path):
+                print(f"[KIOSK] removing stale lock: {path}")
+                os.remove(path)
+        except Exception as e:
+            print(f"[WARN] Failed to remove {lock_file}: {e}")
 
     # 4. Launch
     chrome_cmd = get_chromium_command()
