@@ -35,13 +35,23 @@ const AuxiliaryBlock = ({ time, date, status, isExpanded, isMinimal, onToggleExp
           <div className="flex flex-col items-center justify-center flex-1 text-center">
             <span
               className={cn(
-                'font-black font-display text-text-primary tracking-tighter',
+                'font-black font-display text-text-primary tracking-tighter flex items-baseline justify-center',
                 isMinimal
                   ? 'text-[1.75rem] -rotate-90 py-[0.5rem] leading-none whitespace-nowrap my-[2rem]'
                   : 'text-[4.5rem] leading-none'
               )}
             >
-              {time}
+              {time.split(' ')[0]}
+              {time.split(' ')[1] && (
+                <span
+                  className={cn(
+                    'font-black ml-[0.5rem] opacity-50',
+                    isMinimal ? 'text-[0.875rem]' : 'text-[1.75rem]'
+                  )}
+                >
+                  {time.split(' ')[1]}
+                </span>
+              )}
             </span>
             <span
               className={cn(

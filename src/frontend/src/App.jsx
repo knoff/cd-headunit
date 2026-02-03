@@ -15,11 +15,26 @@ import SettingsView from './views/Settings/SettingsView';
 
 const App = () => {
   const [time, setTime] = useState(new Date());
-  const [systemStatus] = useState({ status: 'ok', version: '0.1.2' });
-  const [language] = useState('ru');
+  const [systemStatus, setSystemStatus] = useState({ status: 'ok', version: '0.1.2' });
+  const [uiSettings, setUiSettings] = useState(() => {
+    const saved = localStorage.getItem('hu_ui_settings');
+    return saved ? JSON.parse(saved) : { language: 'ru', summary_timeout: 15 };
+  });
+
+  const language = uiSettings.language;
+  const summaryTimeout = uiSettings.summary_timeout;
 
   const [appState, sendApp] = useMachine(appReducer, AppStates.DASHBOARD);
-  const { left, right, tea, startSimulation, stopSimulation } = useRealTimeData();
+  const {
+    left,
+    right,
+    tea,
+    startSimulation,
+    stopSimulation,
+    startFlush,
+    startCleaning,
+    resetGroup,
+  } = useRealTimeData();
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -62,7 +77,11 @@ const App = () => {
           onToggleExpand={() => sendApp(AppTransitions.TOGGLE_EXPAND_LEFT)}
           onStartSimulation={(profile) => startSimulation('left', profile)}
           onStopSimulation={() => stopSimulation('left')}
+          onStartFlush={() => startFlush('left')}
+          onStartCleaning={() => startCleaning('left')}
+          onResetGroup={() => resetGroup('left')}
           realTimeData={left}
+          summaryTimeout={summaryTimeout}
           t={t}
         />
 
@@ -80,9 +99,9 @@ const App = () => {
               size="w-[1.75rem] h-[1.75rem]"
               className="h-[4.5rem] w-[4.5rem] rounded-[1.75rem]"
               onClick={() => {
-                const isLeftExtracting = left && !left.done;
-                const isRightExtracting = right && !right.done;
-                if (!isLeftExtracting && !isRightExtracting) {
+                const isLeftActive = left?.state !== 'IDLE' && left?.state !== undefined;
+                const isRightActive = right?.state !== 'IDLE' && right?.state !== undefined;
+                if (!isLeftActive && !isRightActive) {
                   sendApp(AppTransitions.TOGGLE_SYSTEM);
                 }
               }}
@@ -133,7 +152,11 @@ const App = () => {
           onToggleExpand={() => sendApp(AppTransitions.TOGGLE_EXPAND_RIGHT)}
           onStartSimulation={(profile) => startSimulation('right', profile)}
           onStopSimulation={() => stopSimulation('right')}
+          onStartFlush={() => startFlush('right')}
+          onStartCleaning={() => startCleaning('right')}
+          onResetGroup={() => resetGroup('right')}
           realTimeData={right}
+          summaryTimeout={summaryTimeout}
           t={t}
         />
       </DashboardGrid>
@@ -141,7 +164,15 @@ const App = () => {
       {appState === AppStates.SYSTEM_EXPANDED && (
         <div className="fixed inset-0 z-50 p-[3rem] bg-black/80 flex items-center justify-center animate-in fade-in duration-300">
           <div className="w-full max-w-[80rem]">
-            <SettingsView onClose={() => sendApp(AppTransitions.TOGGLE_SYSTEM)} t={t} />
+            <SettingsView
+              onClose={() => sendApp(AppTransitions.TOGGLE_SYSTEM)}
+              t={t}
+              uiSettings={uiSettings}
+              onUpdateUiSettings={(newSettings) => {
+                setUiSettings(newSettings);
+                localStorage.setItem('hu_ui_settings', JSON.stringify(newSettings));
+              }}
+            />
           </div>
         </div>
       )}

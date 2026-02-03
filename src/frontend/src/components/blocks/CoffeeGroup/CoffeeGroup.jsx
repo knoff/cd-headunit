@@ -21,50 +21,123 @@ const CoffeeGroup = ({
   onToggleExpand,
   onStartSimulation,
   onStopSimulation,
+  onStartFlush,
+  onStartCleaning,
+  onResetGroup,
   realTimeData,
+  summaryTimeout = 15,
   t,
 }) => {
-  const [state, send] = useMachine(groupReducer, { status: GroupStates.IDLE, profile: null });
+  // Локальные UI-состояния
+  const [selectedProfile, setSelectedProfile] = useState(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [summarySnapshot, setSummarySnapshot] = useState(null);
+  const [showSummary, setShowSummary] = useState(false);
 
-  // Хендлеры переходов
-  const handleSelectProfile = (profile) => send(GroupTransitions.SELECT_PROFILE, profile);
+  const serverState = realTimeData?.state || 'IDLE';
+  const lastExtractionDataRef = useRef(null);
+  const [isStarting, setIsStarting] = useState(false);
+
+  // Сбрасываем флаг старта, как только сервер подтвердил начало процесса
+  useEffect(() => {
+    if (serverState !== 'IDLE' && isStarting) {
+      setIsStarting(false);
+      setShowConfirmation(false);
+    }
+  }, [serverState, isStarting]);
+
+  // Сохраняем последний кадр экстракции до того, как бэкенд вышлет нули в IDLE
+  useEffect(() => {
+    if (serverState === 'EXTRACTION' && realTimeData) {
+      lastExtractionDataRef.current = { ...realTimeData };
+    }
+  }, [serverState, realTimeData]);
+
+  // Следим за переходом EXTRACTION -> IDLE для показа Summary
+  const prevServerStateRef = useRef(serverState);
+  useEffect(() => {
+    const prev = prevServerStateRef.current;
+
+    // Переход из EXTRACTION в DONE или STOPPED
+    if (prev === 'EXTRACTION' && (serverState === 'DONE' || serverState === 'STOPPED')) {
+      if (lastExtractionDataRef.current) {
+        // Обязательно фиксируем финальное состояние (DONE/STOPPED) в снимке
+        setSummarySnapshot({
+          ...lastExtractionDataRef.current,
+          state: serverState,
+        });
+        setShowSummary(true);
+      }
+    }
+
+    // Если начался новый пролив или флаш - закрываем Summary
+    if ((serverState === 'EXTRACTION' || serverState === 'FLUSH') && showSummary) {
+      setShowSummary(false);
+      setSummarySnapshot(null);
+    }
+
+    prevServerStateRef.current = serverState;
+  }, [serverState, realTimeData, showSummary]);
+
+  // Таймаут Summary (можно вынести в настройки)
+  useEffect(() => {
+    if (showSummary) {
+      const timer = setTimeout(() => {
+        setShowSummary(false);
+        setSummarySnapshot(null);
+      }, summaryTimeout * 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [showSummary, summaryTimeout]);
+
+  // Хендлеры
+  const handleSelectProfile = (profile) => {
+    setSelectedProfile(profile);
+    setShowConfirmation(true);
+  };
 
   const handleConfirmStart = () => {
-    send(GroupTransitions.CONFIRM_START);
-    if (onStartSimulation && state.profile) {
-      onStartSimulation(state.profile);
+    setIsStarting(true);
+    if (onStartSimulation && selectedProfile) {
+      onStartSimulation(selectedProfile);
     }
   };
+
   const handleStop = () => {
-    send(GroupTransitions.STOP);
     if (onStopSimulation) {
       onStopSimulation();
     }
-    // Если мы были развернуты (график), сворачиваемся при ручной остановке
     if (isExpanded && onToggleExpand) {
       onToggleExpand();
     }
   };
 
   const handleDone = () => {
-    send(GroupTransitions.BACK_TO_IDLE);
-    // Сворачиваем блок при выходе из SUMMARY (если еще не свернули при handleStop)
+    setShowSummary(false);
+    setSummarySnapshot(null);
+    if (onResetGroup) onResetGroup();
+
     if (isExpanded && onToggleExpand) {
       onToggleExpand();
     }
   };
 
-  // Синхронизация данных монитора
-  useEffect(() => {
-    // Изменяем условие: переходим в SUMMARY только если пролив БЫЛ активен и данные пропали,
-    // либо по сигналу завершения. Для прототипа добавим небольшую задержку или проверку.
-    if (state.status === GroupStates.EXTRACTING && realTimeData && realTimeData.done) {
-      send(GroupTransitions.FINISH);
-    }
-  }, [realTimeData, state.status, send]);
+  const handleFlush = () => {
+    if (onStartFlush) onStartFlush(side);
+  };
 
-  const isActive = state.status === GroupStates.EXTRACTING || state.status === GroupStates.SUMMARY;
-  const contentHeight = isActive ? 'h-[10.625rem]' : 'h-[14rem]';
+  const isActuallyActive = serverState !== 'IDLE' || showSummary;
+  const contentHeight = isActuallyActive ? 'h-[10.625rem]' : 'h-[14rem]';
+
+  // Определяем подзаголовок
+  let subtitle = t('standby');
+  if (serverState === 'HEATING') subtitle = t('heating');
+  if (serverState === 'EXTRACTION' && selectedProfile) subtitle = selectedProfile.name;
+  if (serverState === 'CLEANING') subtitle = t('cleaning');
+  if (serverState === 'FLUSH') subtitle = t('flush');
+  if (serverState === 'ERROR') subtitle = t('error');
+  if (serverState === 'DONE') subtitle = t('ready');
+  if (serverState === 'STOPPED') subtitle = t('stopped');
 
   return (
     <div
@@ -78,14 +151,17 @@ const CoffeeGroup = ({
       <CardHeader
         title={title}
         titleShort={titleShort}
-        subtitle={isActive && state.profile ? state.profile.name : t('standby')}
-        icon={isActive ? (isExpanded ? LayoutGrid : LineChart) : Coffee}
+        subtitle={subtitle}
+        icon={isActuallyActive ? (isExpanded ? LayoutGrid : LineChart) : Coffee}
         isCompact={isCompact}
         isMinimal={isMinimal}
-        isAccent={isActive}
+        isAccent={isActuallyActive}
         onIconClick={onToggleExpand}
         centerAction={
-          isExpanded && state.status === GroupStates.EXTRACTING ? (
+          isExpanded &&
+          (serverState === 'EXTRACTION' ||
+            serverState === 'FLUSH' ||
+            serverState === 'CLEANING') ? (
             <IconButton
               icon={Power}
               variant="accent"
@@ -103,14 +179,18 @@ const CoffeeGroup = ({
         )}
       >
         {isExpanded ? (
-          <DetailedGraph profileName={state.profile?.name} t={t} />
+          <DetailedGraph profileName={selectedProfile?.name} t={t} />
         ) : (
           <>
-            {state.status === GroupStates.IDLE && (
+            {/* Состояние IDLE (Выбор профилей) */}
+            {serverState === 'IDLE' && !showConfirmation && !showSummary && !isStarting && (
               <div className="flex flex-col h-full">
                 <ProfileList onSelect={handleSelectProfile} t={t} contentHeight={contentHeight} />
                 <div className="mt-auto pt-[0.5rem]">
-                  <button className="flex h-[3.25rem] w-full items-center justify-center gap-[0.75rem] rounded-[1.25rem] bg-surface-light border border-white/5 text-[1.125rem] font-black font-display uppercase tracking-wider text-text-primary active:scale-[0.98] active:bg-surface-active transition-all">
+                  <button
+                    onClick={handleFlush}
+                    className="flex h-[3.25rem] w-full items-center justify-center gap-[0.75rem] rounded-[1.25rem] bg-surface-light border border-white/5 text-[1.125rem] font-black font-display uppercase tracking-wider text-text-primary active:scale-[0.98] active:bg-surface-active transition-all"
+                  >
                     <Flame className="w-[1.25rem] h-[1.25rem] text-accent-red" />
                     {t('flush')}
                   </button>
@@ -118,16 +198,24 @@ const CoffeeGroup = ({
               </div>
             )}
 
-            {state.status === GroupStates.READY_TO_START && (
+            {/* Подтверждение старта или ожидание бэкенда */}
+            {(showConfirmation || isStarting) && serverState === 'IDLE' && (
               <ExtractionConfirmation
-                profile={state.profile}
+                profile={selectedProfile}
                 onConfirm={handleConfirmStart}
-                onCancel={handleDone}
+                onCancel={() => {
+                  setShowConfirmation(false);
+                  setIsStarting(false);
+                }}
                 t={t}
+                isPending={isStarting}
               />
             )}
 
-            {state.status === GroupStates.EXTRACTING && (
+            {/* Активная экстракция/флаш/очистка */}
+            {(serverState === 'EXTRACTION' ||
+              serverState === 'FLUSH' ||
+              serverState === 'CLEANING') && (
               <ExtractionMonitor
                 data={realTimeData || {}}
                 t={t}
@@ -137,11 +225,35 @@ const CoffeeGroup = ({
               />
             )}
 
-            {state.status === GroupStates.SUMMARY && (
+            {/* ERROR или HEATING */}
+            {(serverState === 'ERROR' || serverState === 'HEATING') && !showSummary && (
+              <div className="flex-1 flex flex-col items-center justify-center gap-[1rem]">
+                <div
+                  className={cn(
+                    'w-[4rem] h-[4rem] rounded-full flex items-center justify-center',
+                    serverState === 'ERROR'
+                      ? 'bg-accent-red/20 text-accent-red'
+                      : 'bg-white/10 text-text-muted animate-pulse'
+                  )}
+                >
+                  {serverState === 'ERROR' ? (
+                    <Power className="w-[2rem] h-[2rem]" />
+                  ) : (
+                    <Flame className="w-[2rem] h-[2rem]" />
+                  )}
+                </div>
+                <span className="text-[1.25rem] font-bold uppercase tracking-tight">
+                  {subtitle}
+                </span>
+              </div>
+            )}
+
+            {/* SUMMARY (Оверлей) */}
+            {showSummary && (
               <ExtractionSummary
-                data={realTimeData || { yield: 0, time: '0:00' }}
-                profile={state.profile}
-                reason={state.endReason || 'done'}
+                data={summarySnapshot || { yield: 0, time: '0:00' }}
+                profile={selectedProfile}
+                reason={summarySnapshot?.state === 'DONE' ? 'done' : 'cancelled'}
                 onDone={handleDone}
                 t={t}
               />

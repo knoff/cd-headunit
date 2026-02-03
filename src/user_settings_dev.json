@@ -1,0 +1,9 @@
+{
+  "serial": "CDR-GENERIC",
+  "wifi_app_pass": "password123",
+  "wifi_client_ssid": "test-network",
+  "wifi_client_pass": "password",
+  "wifi_country": "RU",
+  "language": "en",
+  "timezone": "Europe/Moscow"
+}

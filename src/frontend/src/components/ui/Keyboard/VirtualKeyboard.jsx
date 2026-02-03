@@ -299,7 +299,7 @@ const VirtualKeyboard = ({ t }) => {
               onClick={() => handleKeyPress('CONFIRM')}
               className="flex-1 h-[3.5rem] bg-accent-red text-white rounded-[1.25rem] font-black uppercase tracking-wider shadow-glow-red hover:brightness-110 active:scale-95 transition-all text-[0.875rem] font-display"
             >
-              {t('confirm') || 'CONFIRM'}
+              {t('done') || 'DONE'}
             </button>
           </div>
         </div>
