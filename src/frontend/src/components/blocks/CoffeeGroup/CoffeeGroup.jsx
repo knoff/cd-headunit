@@ -70,25 +70,17 @@ const CoffeeGroup = ({
       }
     }
 
-    // Если начался новый пролив или флаш - закрываем Summary
-    if ((serverState === 'EXTRACTION' || serverState === 'FLUSH') && showSummary) {
+    // Если начался новый пролив, флаш, или сервер вернулся в IDLE (таймаут) - закрываем Summary
+    if (
+      (serverState === 'EXTRACTION' || serverState === 'FLUSH' || serverState === 'IDLE') &&
+      showSummary
+    ) {
       setShowSummary(false);
       setSummarySnapshot(null);
     }
 
     prevServerStateRef.current = serverState;
   }, [serverState, realTimeData, showSummary]);
-
-  // Таймаут Summary (можно вынести в настройки)
-  useEffect(() => {
-    if (showSummary) {
-      const timer = setTimeout(() => {
-        setShowSummary(false);
-        setSummarySnapshot(null);
-      }, summaryTimeout * 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [showSummary, summaryTimeout]);
 
   // Хендлеры
   const handleSelectProfile = (profile) => {

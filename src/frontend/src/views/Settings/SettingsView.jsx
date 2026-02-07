@@ -21,6 +21,9 @@ import {
 import { useKeyboard } from '../../hooks/useKeyboard';
 import IconButton from '../../components/ui/IconButton';
 import Select from '../../components/ui/Select';
+import TimePicker from '../../components/ui/TimePicker';
+import Toggle from '../../components/ui/Toggle';
+import WheelPicker from '../../components/ui/WheelPicker';
 
 const CATEGORIES = [
   { id: 'info', icon: Cpu, labelKey: 'info' },
@@ -45,15 +48,33 @@ const TIMEZONE_OPTIONS = [
   { value: 'Europe/London', label: 'London (GMT+0)' },
   { value: 'America/New_York', label: 'New York (GMT-5)' },
   { value: 'Asia/Dubai', label: 'Dubai (GMT+4)' },
+  { value: 'Asia/Tokyo', label: 'Tokyo (GMT+9)' },
+  { value: 'Europe/Paris', label: 'Paris (GMT+1)' },
+  { value: 'Asia/Singapore', label: 'Singapore (GMT+8)' },
+  { value: 'Australia/Sydney', label: 'Sydney (GMT+11)' },
 ];
 
-const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
+const TIME_FORMAT_OPTIONS = [
+  { value: '24h', label: '24 Hours (14:30)' },
+  { value: '12h', label: '12 Hours (02:30 PM)' },
+];
+
+const SettingsView = ({
+  onClose,
+  t,
+  uiSettings,
+  onUpdateUiSettings,
+  onUpdateSystemSettings,
+  currentTime,
+}) => {
   const { openKeyboard } = useKeyboard();
   const [activeCategory, setActiveCategory] = useState('info');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(null); // 'reboot' | 'shutdown' | null
   const [selectConfig, setSelectConfig] = useState(null); // { title, options, value, onSelect }
+  const [wheelConfig, setWheelConfig] = useState(null); // { title, options, value, onSave }
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   // Исходные настройки (сервер + UI)
   const [originalSettings, setOriginalSettings] = useState({});
@@ -64,8 +85,11 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
     wifi_client_pass: '',
     wifi_country: 'RU',
     language: 'ru',
+    time_format: '24h',
     summary_timeout: 15,
     timezone: 'Europe/Moscow',
+    ntp_enabled: true,
+    system_time: '',
     version: '0.0.0',
   });
 
@@ -81,7 +105,14 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
       const healthRes = await fetch('/api/health');
       const healthData = await healthRes.json();
 
-      const merged = { ...data, ...uiSettings, version: healthData.version };
+      // Filter uiSettings to only include allowed UI keys
+      const allowedUiKeys = ['language', 'time_format'];
+      const filteredUiSettings = Object.keys(uiSettings).reduce((acc, key) => {
+        if (allowedUiKeys.includes(key)) acc[key] = uiSettings[key];
+        return acc;
+      }, {});
+
+      const merged = { ...data, ...filteredUiSettings, version: healthData.version };
       setOriginalSettings(merged);
       setBufferedSettings(merged);
     } catch (e) {
@@ -96,7 +127,7 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
     try {
       // 1. Обработка UI настроек (локально)
       const uiUpdates = {};
-      const uiKeys = ['language', 'summary_timeout'];
+      const uiKeys = ['language', 'time_format'];
       uiKeys.forEach((key) => {
         if (bufferedSettings[key] !== originalSettings[key]) {
           let val = bufferedSettings[key];
@@ -115,11 +146,22 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
         if (
           !uiKeys.includes(key) &&
           bufferedSettings[key] !== originalSettings[key] &&
-          key !== 'version'
+          bufferedSettings[key] !== originalSettings[key] &&
+          key !== 'version' &&
+          key !== 'system_time'
         ) {
           updates[key] = bufferedSettings[key];
         }
       });
+
+      // Добавляем system_time только если NTP выключен и оно изменилось
+      if (
+        !bufferedSettings.ntp_enabled &&
+        bufferedSettings.system_time &&
+        bufferedSettings.system_time !== originalSettings.system_time
+      ) {
+        updates['system_time'] = bufferedSettings.system_time;
+      }
 
       if (Object.keys(updates).length > 0) {
         const response = await fetch('/api/settings', {
@@ -129,6 +171,9 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
         });
         if (response.ok) {
           setOriginalSettings({ ...bufferedSettings });
+          if (onUpdateSystemSettings) {
+            onUpdateSystemSettings(updates);
+          }
         }
       }
       onClose();
@@ -150,12 +195,27 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
   };
 
   const handleFieldClick = (fieldId, label, config = {}) => {
+    if (fieldId === 'system_time') {
+      setShowTimePicker(true);
+      return;
+    }
+
     if (config.type === 'select') {
       setSelectConfig({
         title: label,
         options: config.options,
         value: bufferedSettings[fieldId],
         onSelect: (val) => setBufferedSettings((prev) => ({ ...prev, [fieldId]: val })),
+      });
+      return;
+    }
+
+    if (config.type === 'wheel') {
+      setWheelConfig({
+        title: label,
+        options: config.options,
+        value: bufferedSettings[fieldId],
+        onSave: (val) => setBufferedSettings((prev) => ({ ...prev, [fieldId]: val })),
       });
       return;
     }
@@ -171,25 +231,45 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
 
   const SettingField = ({ id, label, icon: Icon, config = {}, valueOverride }) => (
     <div
-      onClick={() => !config.readOnly && handleFieldClick(id, label, config)}
+      onClick={() => {
+        if (config.type === 'toggle') return; // Toggle handles its own click
+        !config.readOnly && !config.disabled && handleFieldClick(id, label, config);
+      }}
       className={`flex items-center justify-between p-[0.625rem] h-[4.75rem] bg-white/5 border border-white/5 rounded-[1rem] transition-all snap-start ${
-        config.readOnly ? 'opacity-60 cursor-default' : 'cursor-pointer active:bg-white/10'
+        config.readOnly || config.disabled
+          ? 'opacity-60 cursor-default'
+          : 'cursor-pointer active:bg-white/10'
       }`}
     >
       <div className="flex items-center gap-[0.5rem]">
-        <div className="p-[0.3125rem] bg-accent-red/10 rounded-[0.5rem]">
-          <Icon className="w-[0.875rem] h-[0.875rem] text-accent-red" />
+        <div
+          className={`p-[0.3125rem] rounded-[0.5rem] ${config.readOnly || config.disabled ? 'bg-white/5' : 'bg-accent-red/10'}`}
+        >
+          <Icon
+            className={`w-[0.875rem] h-[0.875rem] ${config.readOnly || config.disabled ? 'text-text-muted' : 'text-accent-red'}`}
+          />
         </div>
         <div className="flex flex-col">
           <span className="text-text-muted text-[0.625rem] font-bold uppercase tracking-wider">
             {label}
           </span>
           <span className="text-text-primary text-[0.875rem] font-black line-clamp-1">
-            {valueOverride || bufferedSettings[id] || '---'}
+            {config.type === 'toggle' ? '' : valueOverride || bufferedSettings[id] || '---'}
           </span>
         </div>
       </div>
-      {!config.readOnly && <div className="text-text-muted opacity-30 text-[1.25rem]">›</div>}
+
+      {config.type === 'toggle' ? (
+        <div className="pr-2">
+          <Toggle
+            checked={!!bufferedSettings[id]}
+            onChange={(val) => setBufferedSettings((prev) => ({ ...prev, [id]: val }))}
+          />
+        </div>
+      ) : (
+        !config.readOnly &&
+        !config.disabled && <div className="text-text-muted opacity-30 text-[1.25rem]">›</div>
+      )}
     </div>
   );
 
@@ -276,11 +356,55 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
                   LANGUAGE_OPTIONS.find((o) => o.value === bufferedSettings.language)?.label
                 }
               />
+
               <SettingField
                 id="summary_timeout"
                 label={t('summary_timeout')}
                 icon={Clock}
-                config={{ allowedLayouts: ['num'] }}
+                config={{
+                  type: 'wheel',
+                  options: [
+                    { value: 0, label: `0 ${t('sec')} (${t('disabled')})` },
+                    { value: 5, label: `5 ${t('sec')}` },
+                    { value: 10, label: `10 ${t('sec')}` },
+                    { value: 15, label: `15 ${t('sec')}` },
+                    { value: 20, label: `20 ${t('sec')}` },
+                    { value: 30, label: `30 ${t('sec')}` },
+                  ],
+                }}
+                valueOverride={(() => {
+                  const val =
+                    bufferedSettings.summary_timeout !== undefined
+                      ? parseInt(bufferedSettings.summary_timeout, 10)
+                      : 15;
+                  const opts = [
+                    { value: 0, label: `0 ${t('sec')} (${t('disabled')})` },
+                    { value: 5, label: `5 ${t('sec')}` },
+                    { value: 10, label: `10 ${t('sec')}` },
+                    { value: 15, label: `15 ${t('sec')}` },
+                    { value: 20, label: `20 ${t('sec')}` },
+                    { value: 30, label: `30 ${t('sec')}` },
+                  ];
+                  return opts.find((o) => o.value === val)?.label;
+                })()}
+              />
+              <SettingField
+                id="time_format"
+                label={t('time_format') || 'Time Format'}
+                icon={Clock}
+                config={{
+                  type: 'select',
+                  options: [
+                    { value: '24h', label: '24 Hours (14:30)' },
+                    { value: '12h', label: '12 Hours (02:30 PM)' },
+                  ],
+                }}
+                valueOverride={
+                  [
+                    { value: '24h', label: '24 Hours (14:30)' },
+                    { value: '12h', label: '12 Hours (02:30 PM)' },
+                  ].find((o) => o.value === (bufferedSettings.time_format || '24h'))?.label
+                }
               />
             </div>
           </div>
@@ -299,6 +423,38 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
                 config={{ type: 'select', options: TIMEZONE_OPTIONS }}
                 valueOverride={
                   TIMEZONE_OPTIONS.find((o) => o.value === bufferedSettings.timezone)?.label
+                }
+              />
+              <SettingField
+                id="ntp_enabled"
+                label={t('sys_auto_time')}
+                icon={Clock}
+                config={{ type: 'toggle' }}
+              />
+
+              <SettingField
+                id="system_time"
+                label={t('sys_set_time')}
+                icon={Clock}
+                config={{
+                  disabled: bufferedSettings.ntp_enabled,
+                  readOnly: bufferedSettings.ntp_enabled,
+                  type: 'time',
+                }}
+                valueOverride={
+                  bufferedSettings.ntp_enabled && currentTime
+                    ? currentTime.toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: bufferedSettings.time_format === '12h',
+                      })
+                    : bufferedSettings.system_time
+                      ? new Date(bufferedSettings.system_time).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: bufferedSettings.time_format === '12h',
+                        })
+                      : '---'
                 }
               />
               <button
@@ -443,6 +599,24 @@ const SettingsView = ({ onClose, t, uiSettings, onUpdateUiSettings }) => {
           onClose={() => setSelectConfig(null)}
         />
       )}
+
+      <TimePicker
+        isOpen={showTimePicker}
+        initialValue={bufferedSettings.system_time || new Date()}
+        is24Hour={bufferedSettings.time_format === '24h'}
+        onClose={() => setShowTimePicker(false)}
+        onSave={(val) => setBufferedSettings((prev) => ({ ...prev, system_time: val }))}
+        t={t}
+      />
+
+      <WheelPicker
+        isOpen={!!wheelConfig}
+        title={wheelConfig?.title}
+        options={wheelConfig?.options || []}
+        value={wheelConfig?.value}
+        onSave={wheelConfig?.onSave}
+        onClose={() => setWheelConfig(null)}
+      />
 
       {saving && (
         <div className="absolute bottom-[1rem] right-[1rem] flex items-center gap-[0.5rem] px-[1rem] py-[0.5rem] bg-black/60 rounded-full border border-white/10 animate-in fade-in">

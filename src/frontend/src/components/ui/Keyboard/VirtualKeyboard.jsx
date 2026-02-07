@@ -91,27 +91,29 @@ const VirtualKeyboard = ({ t }) => {
     );
     if (cursorPos === 0) items.push(cursorEl);
 
-    buffer.split('').forEach((char, i) => {
-      const nextPos = i + 1;
-      if (char === '\n') {
-        items.push(<div key={`br-${i}`} className="w-full h-0" />);
-        if (cursorPos === nextPos) items.push(cursorEl);
-      } else {
-        items.push(
-          <span
-            key={`char-${i}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setCursorPos(nextPos);
-            }}
-            className="inline-block font-bold font-display cursor-pointer hover:bg-white/10 px-[1px] text-[1.75rem] leading-[2rem] transition-colors rounded"
-          >
-            {char}
-          </span>
-        );
-        if (cursorPos === nextPos) items.push(cursorEl);
-      }
-    });
+    String(buffer)
+      .split('')
+      .forEach((char, i) => {
+        const nextPos = i + 1;
+        if (char === '\n') {
+          items.push(<div key={`br-${i}`} className="w-full h-0" />);
+          if (cursorPos === nextPos) items.push(cursorEl);
+        } else {
+          items.push(
+            <span
+              key={`char-${i}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCursorPos(nextPos);
+              }}
+              className="inline-block font-bold font-display cursor-pointer hover:bg-white/10 px-[1px] text-[1.75rem] leading-[2rem] transition-colors rounded"
+            >
+              {char}
+            </span>
+          );
+          if (cursorPos === nextPos) items.push(cursorEl);
+        }
+      });
 
     return <div className="flex flex-wrap items-center w-full min-h-[2rem]">{items}</div>;
   };

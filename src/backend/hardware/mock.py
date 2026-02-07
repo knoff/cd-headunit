@@ -1,6 +1,7 @@
 import asyncio
 import time
 import random
+import settings_manager
 
 class MockHardware:
     # States
@@ -49,8 +50,13 @@ class MockHardware:
                         "state": state
                     }
 
-                # Авто-уход в IDLE через 15 секунд (защита бэкенда)
-                if time.time() - g["start_time"] > 15:
+                # Авто-уход в IDLE (защита бэкенда)
+                settings = settings_manager.get_settings()
+                timeout = int(settings.get("summary_timeout", 15))
+
+                # Если timeout == 0, значит Summary отключен (сразу в IDLE)
+                # Иначе ждем указанное время
+                if timeout == 0 or (time.time() - g["start_time"] > timeout):
                     g["state"] = self.IDLE
             elif state == self.EXTRACTION:
                 elapsed = time.time() - g["start_time"]

@@ -18,11 +18,16 @@ const App = () => {
   const [systemStatus, setSystemStatus] = useState({ status: 'ok', version: '0.1.2' });
   const [uiSettings, setUiSettings] = useState(() => {
     const saved = localStorage.getItem('hu_ui_settings');
-    return saved ? JSON.parse(saved) : { language: 'ru', summary_timeout: 15 };
+    return saved ? JSON.parse(saved) : { language: 'ru', summary_timeout: 15, time_format: '24h' };
   });
+  const [systemSettings, setSystemSettings] = useState({});
 
   const language = uiSettings.language;
-  const summaryTimeout = uiSettings.summary_timeout;
+  // Use backend setting if available, fallback to UI setting or default
+  const summaryTimeout =
+    systemSettings.summary_timeout !== undefined
+      ? parseInt(systemSettings.summary_timeout, 10)
+      : uiSettings.summary_timeout || 15;
 
   const [appState, sendApp] = useMachine(appReducer, AppStates.DASHBOARD);
   const {
@@ -39,13 +44,24 @@ const App = () => {
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
 
-    // Fetch version from backend
-    fetch('/api/health')
-      .then((r) => r.json())
-      .then((data) => {
-        setSystemStatus({ status: data.status, version: data.version });
-      })
-      .catch((e) => console.error('[APP] Health check failed:', e));
+    const fetchData = async () => {
+      try {
+        const [healthRes, settingsRes] = await Promise.all([
+          fetch('/api/health'),
+          fetch('/api/settings'),
+        ]);
+
+        const healthData = await healthRes.json();
+        const settingsData = await settingsRes.json();
+
+        setSystemStatus({ status: healthData.status, version: healthData.version });
+        setSystemSettings(settingsData);
+      } catch (e) {
+        console.error('[APP] Init failed:', e);
+      }
+    };
+
+    fetchData();
 
     return () => clearInterval(timer);
   }, []);
@@ -55,6 +71,7 @@ const App = () => {
   const formattedTime = time.toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-US', {
     hour: '2-digit',
     minute: '2-digit',
+    hour12: uiSettings.time_format === '12h',
   });
   const formattedDate = time.toLocaleDateString(language === 'ru' ? 'ru-RU' : 'en-US', {
     day: 'numeric',
@@ -168,9 +185,13 @@ const App = () => {
               onClose={() => sendApp(AppTransitions.TOGGLE_SYSTEM)}
               t={t}
               uiSettings={uiSettings}
+              currentTime={time}
               onUpdateUiSettings={(newSettings) => {
                 setUiSettings(newSettings);
                 localStorage.setItem('hu_ui_settings', JSON.stringify(newSettings));
+              }}
+              onUpdateSystemSettings={(newSysSettings) => {
+                setSystemSettings((prev) => ({ ...prev, ...newSysSettings }));
               }}
             />
           </div>

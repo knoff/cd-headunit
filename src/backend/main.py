@@ -27,6 +27,7 @@ class SettingsUpdate(BaseModel):
     wifi_country: Optional[str] = None
     language: Optional[str] = None
     timezone: Optional[str] = None
+    summary_timeout: Optional[int] = None
 
 def get_app_version():
     """Reads the version from manifest.json."""
@@ -79,9 +80,10 @@ async def telemetry_websocket(websocket: WebSocket):
         while True:
             data = await hw.get_telemetry()
 
-            # Определяем частоту: 5Гц если идет активный процесс, иначе 1Гц
+            # Определяем частоту: 5Гц для любых активных состояний (включая DONE и STOPPED для точного таймера),
+            # и 1Гц только для полного IDLE
             is_active = any(
-                g.get("state") in ["EXTRACTION", "FLUSH", "CLEANING"]
+                g.get("state") != "IDLE"
                 for g in [data.get("left", {}), data.get("right", {})]
             )
 
