@@ -23,6 +23,7 @@ cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-monitor.path" /mnt/dst/etc/
 cp -v "$WORKSPACE_DIR/system/systemd/headunit-update-usb-scan.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/systemd/headunit-kiosk.service" /mnt/dst/etc/systemd/system/
 cp -v "$WORKSPACE_DIR/system/boot/keyboard" /mnt/dst/etc/default/keyboard
+cp -v "$WORKSPACE_DIR/builder/assets/50-headunit-permissions.rules" /mnt/dst/etc/polkit-1/rules.d/
 
 # Скрипт оверлея
 mkdir -p /mnt/dst/tmp/overlay_script

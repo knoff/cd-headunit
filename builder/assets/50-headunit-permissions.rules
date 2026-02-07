@@ -1,0 +1,9 @@
+polkit.addRule(function(action, subject) {
+    if ((action.id.indexOf("org.freedesktop.timedate1.") == 0 ||
+         action.id.indexOf("org.freedesktop.hostname1.") == 0 ||
+         action.id.indexOf("org.freedesktop.login1.") == 0 ||
+         action.id.indexOf("org.freedesktop.NetworkManager.") == 0) &&
+        subject.isInGroup("sudo")) {
+        return polkit.Result.YES;
+    }
+});
